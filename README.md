@@ -35,11 +35,12 @@ sem hospedagem, sem webhook — conexão direta com o WhatsApp via QR code.
    GEMINI_API_KEY=sua-chave-aqui
    GEMINI_MODEL=gemini-3.5-flash-lite
 
-   WHATSAPP_NUMBER_AUTORIZADO=5535999999999
+   WHATSAPP_NUMEROS_AUTORIZADOS=5535999999999,5535988888888
    ```
-   O número é só dígitos (código do país + DDD + número), sem `+`, sem espaços. Os nomes
-   de modelo mudam com o tempo — se algum ficar indisponível, é só trocar aqui, não tem
-   nada disso espalhado pelo código.
+   Um ou mais números (separados por vírgula) que podem falar com o bot — só dígitos
+   (código do país + DDD + número), sem `+`, sem espaços. Os nomes de modelo mudam com o
+   tempo — se algum ficar indisponível, é só trocar aqui, não tem nada disso espalhado
+   pelo código.
 3. Rode:
    ```
    npm run dev
@@ -48,16 +49,14 @@ sem hospedagem, sem webhook — conexão direta com o WhatsApp via QR code.
    Conectar um aparelho). A sessão fica salva em `auth_info/` — não precisa escanear de
    novo nas próximas vezes, a menos que desconecte a sessão pelo celular.
 
-## Como testar sozinho (modo self-chat)
+## Número do bot vs. números autorizados
 
-Se você só tem um número de WhatsApp disponível, o mesmo número pode ser escaneado no QR
-**e** ser o `WHATSAPP_NUMBER_AUTORIZADO`. Nesse caso, mande as mensagens de teste na
-conversa **"Mensagem para você mesmo"** do próprio WhatsApp — o bot reconhece esse
-self-chat automaticamente.
-
-Para uso real (produtor + funcionários mandando mensagem), o ideal é ter um número
-dedicado para o bot (separado do número que vai mandar as mensagens), escaneado no QR,
-com `WHATSAPP_NUMBER_AUTORIZADO` apontando para o número de quem pode falar com o bot.
+O ideal é ter um número **dedicado** pro bot (o que é escaneado no QR), separado dos
+números que vão efetivamente mandar mensagem — coloque um ou mais desses últimos em
+`WHATSAPP_NUMEROS_AUTORIZADOS`. Cada número autorizado tem sua própria confirmação
+pendente e memória de acompanhamento (`src/index.ts`), então duas pessoas podem usar o
+bot ao mesmo tempo sem uma interferir na conversa da outra — a resposta sempre volta
+pra conversa de quem mandou a mensagem, nunca é cruzada entre os dois.
 
 ## Fluxo
 
@@ -203,7 +202,8 @@ recusados com um aviso.
 
 ## Limitações conhecidas do MVP
 
-- Um único número autorizado, fixo no `.env` — sem multiusuário.
+- Vários números autorizados, mas sem conceito de propriedades/talhões separados por
+  usuário — todo mundo em `WHATSAPP_NUMEROS_AUTORIZADOS` vê e registra na mesma base.
 - Confirmação pendente e memória de acompanhamento de perguntas ficam em memória
   (`Map`); reiniciar o bot descarta qualquer confirmação ou pergunta em aberto.
 - Sem controle de estoque — não há como responder "quantas sacas ainda tenho".

@@ -10,9 +10,23 @@ import {
   formatarMoeda,
 } from "./reports";
 
-const numeroAutorizado = process.env.WHATSAPP_NUMBER_AUTORIZADO;
-if (!numeroAutorizado) {
-  throw new Error("Defina WHATSAPP_NUMBER_AUTORIZADO no arquivo .env");
+// Aceita uma lista separada por vírgula (WHATSAPP_NUMEROS_AUTORIZADOS) ou,
+// por compatibilidade, a variável antiga de um único número.
+function lerNumerosAutorizados(): string[] {
+  const lista = process.env.WHATSAPP_NUMEROS_AUTORIZADOS;
+  if (lista) {
+    return lista
+      .split(",")
+      .map((n) => n.trim())
+      .filter((n) => n.length > 0);
+  }
+  const unico = process.env.WHATSAPP_NUMBER_AUTORIZADO;
+  return unico ? [unico] : [];
+}
+
+const numerosAutorizados = lerNumerosAutorizados();
+if (numerosAutorizados.length === 0) {
+  throw new Error("Defina WHATSAPP_NUMEROS_AUTORIZADOS (ou WHATSAPP_NUMBER_AUTORIZADO) no arquivo .env");
 }
 
 interface ConfirmacaoPendente {
@@ -20,8 +34,9 @@ interface ConfirmacaoPendente {
   mensagemOriginal: string;
 }
 
-// Um único produtor autorizado no MVP, mas mantido como Map por simplicidade
-// de extensão futura (ver README/escopo do projeto).
+// Uma entrada por número autorizado — cada produtor tem sua própria
+// confirmação pendente e memória de acompanhamento, sem interferir uma na
+// outra.
 const pendentes = new Map<string, ConfirmacaoPendente>();
 
 // Guarda a última pergunta de esclarecimento do bot (quando ele não teve
@@ -70,15 +85,17 @@ function formatarResumo(entrada: EntradaExtraida): string {
 
 async function processarMensagem(
   texto: string,
-  enviarMensagem: (texto: string) => Promise<void>,
+  remetente: string,
+  enviarMensagem: (remetente: string, texto: string) => Promise<void>,
 ): Promise<void> {
   const normalizado = normalizarTexto(texto);
+  const responder = (resposta: string) => enviarMensagem(remetente, resposta);
 
   if (normalizado.includes("uso de ia") || normalizado.includes("uso da ia") || normalizado.includes("consumo de ia")) {
     const relatorio = normalizado.includes("passado")
       ? gerarRelatorioUsoIAMesPassado()
       : gerarRelatorioUsoIAMesAtual();
-    await enviarMensagem(relatorio);
+    await responder(relatorio);
     return;
   }
 
@@ -86,14 +103,14 @@ async function processarMensagem(
     const relatorio = normalizado.includes("passado")
       ? gerarRelatorioMesPassado()
       : gerarRelatorioMesAtual();
-    await enviarMensagem(relatorio);
+    await responder(relatorio);
     return;
   }
 
-  const pendente = pendentes.get(numeroAutorizado!);
+  const pendente = pendentes.get(remetente);
 
   if (pendente) {
-    pendentes.delete(numeroAutorizado!);
+    pendentes.delete(remetente);
 
     if (ehConfirmacaoPositiva(normalizado)) {
       const entrada: EntradaParaSalvar = {
@@ -101,7 +118,7 @@ async function processarMensagem(
         mensagem_original: pendente.mensagemOriginal,
       };
       inserirEntry(entrada);
-      await enviarMensagem("Registrado!");
+      await responder("Registrado!");
       return;
     }
 
@@ -109,36 +126,36 @@ async function processarMensagem(
     // o fluxo abaixo, tratando esta mensagem como um novo registro.
   }
 
-  const trocaAnterior = contextoPendente.get(numeroAutorizado!);
-  contextoPendente.delete(numeroAutorizado!);
+  const trocaAnterior = contextoPendente.get(remetente);
+  contextoPendente.delete(remetente);
 
   const resultado = await interpretarMensagem(texto, trocaAnterior);
 
   if (resultado.tipo === "registrar") {
-    pendentes.set(numeroAutorizado!, { extraida: resultado.dados, mensagemOriginal: texto });
-    await enviarMensagem(formatarResumo(resultado.dados));
+    pendentes.set(remetente, { extraida: resultado.dados, mensagemOriginal: texto });
+    await responder(formatarResumo(resultado.dados));
     return;
   }
 
   if (!resultado.resolvida) {
-    contextoPendente.set(numeroAutorizado!, { perguntaProdutor: texto, respostaBot: resultado.texto });
+    contextoPendente.set(remetente, { perguntaProdutor: texto, respostaBot: resultado.texto });
   }
-  await enviarMensagem(resultado.texto);
+  await responder(resultado.texto);
 }
 
 async function main(): Promise<void> {
   initDb();
 
-  const { enviarMensagem } = await conectarWhatsApp(numeroAutorizado!, async (texto) => {
+  const { enviarMensagem } = await conectarWhatsApp(numerosAutorizados, async (texto, remetente) => {
     try {
-      await processarMensagem(texto, enviarMensagem);
+      await processarMensagem(texto, remetente, enviarMensagem);
     } catch (err) {
       console.error("Erro ao processar mensagem:", err);
-      await enviarMensagem("Ocorreu um erro ao processar sua mensagem. Tente novamente.");
+      await enviarMensagem(remetente, "Ocorreu um erro ao processar sua mensagem. Tente novamente.");
     }
   });
 
-  console.log(`Bot pronto. Aguardando mensagens de ${numeroAutorizado}...`);
+  console.log(`Bot pronto. Aguardando mensagens de: ${numerosAutorizados.join(", ")}`);
 }
 
 main().catch((err) => {
