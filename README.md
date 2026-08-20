@@ -77,8 +77,9 @@ pra conversa de quem mandou a mensagem, nunca é cruzada entre os dois.
 3. Se a resposta for **"sim"** (case-insensitive), o registro é gravado no banco e o bot responde "Registrado!".
 4. Qualquer outra resposta descarta o registro pendente e trata a mensagem seguinte como uma nova tentativa de extração.
 5. Comandos especiais, reconhecidos direto por texto (não passam pela IA):
-   - **"relatório"** ou **"relatorio"** → resumo do mês atual
-   - **"relatório mês passado"** → resumo do mês anterior
+   - **"relatório"** ou **"relatorio"** → resumo do mês atual (texto)
+   - **"relatório mês passado"** → resumo do mês anterior (texto)
+   - **"relatório em pdf"** / **"relatório pdf mês passado"** → mesma coisa, como um PDF anexado (ver seção "Relatório em PDF")
    - **"uso de ia"** → chamadas, tokens e custo estimado do mês atual (ver seção "Uso e custo de IA")
    - **"uso de ia mês passado"** → mesma coisa, mês anterior
 
@@ -146,6 +147,15 @@ Anthropic e Google cobram em USD, não em reais). Preços mudam com o tempo, por
 tem nada fixo no código — se algum não estiver configurado, o relatório mostra os tokens
 mas avisa que o custo daquele provider não pôde ser estimado, em vez de chutar um valor.
 
+### Relatório em PDF
+
+Mande **"relatório em pdf"** (ou "relatório pdf mês passado") que o bot gera um PDF
+(`src/pdf.ts`, biblioteca `pdfkit` — sem depender de navegador/Chromium, leve o
+suficiente pra rodar numa VM de 1GB) com cabeçalho, cartões de resumo (total gasto,
+total colhido) e uma tabela detalhada por categoria, e manda como arquivo anexado no
+WhatsApp. Usa os mesmos dados/cálculos do relatório em texto (`src/reports.ts`) — não
+tem nenhuma IA envolvida na geração, então não gera custo além do processamento local.
+
 ## Schema do banco (`entries`, SQLite em `data/gestao.db`)
 
 | Campo                | Tipo    | Observação                                                              |
@@ -176,7 +186,8 @@ src/
   parser.ts    # monta o prompt/ferramentas e delega ao AIRouter (registrar, consultar ou conversar)
   audio.ts     # transcrição de áudio via Gemini (entende OGG/Opus nativamente)
   whatsapp.ts  # conexão Baileys (QR, filtro de remetente, áudio, envio/recebimento)
-  reports.ts   # geração dos relatórios mensais
+  reports.ts   # geração dos relatórios mensais (texto)
+  pdf.ts       # geração do relatório mensal em PDF (pdfkit)
   index.ts     # orquestração (fluxo de confirmação, comandos especiais)
 auth_info/     # sessão do WhatsApp (gerada automaticamente, git-ignored)
 data/          # banco SQLite (gerado automaticamente, git-ignored)
@@ -207,8 +218,8 @@ recusados com um aviso.
 - Confirmação pendente e memória de acompanhamento de perguntas ficam em memória
   (`Map`); reiniciar o bot descarta qualquer confirmação ou pergunta em aberto.
 - Sem controle de estoque — não há como responder "quantas sacas ainda tenho".
-- Sem correção/exclusão de registros já salvos, sem PDF/Excel, sem memória persistente
-  da propriedade (talhões, hectares) — fases seguintes.
+- Sem correção/exclusão de registros já salvos, sem exportação em Excel, sem memória
+  persistente da propriedade (talhões, hectares) — fases seguintes.
 - Tem métricas de uso/custo (comando "uso de ia"), mas ainda sem limite de orçamento
   mensal configurável nem qualquer ação automática (ex: priorizar Gemini) perto de um
   limite — é só visibilidade por enquanto.

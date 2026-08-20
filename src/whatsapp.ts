@@ -24,6 +24,7 @@ export type MensagemHandler = (texto: string, remetente: string) => Promise<void
 
 export interface WhatsAppConexao {
   enviarMensagem: (remetente: string, texto: string) => Promise<void>;
+  enviarDocumento: (remetente: string, buffer: Buffer, nomeArquivo: string, mimetype: string) => Promise<void>;
 }
 
 export async function conectarWhatsApp(
@@ -54,6 +55,18 @@ export async function conectarWhatsApp(
 
   async function enviarParaJid(jid: string, texto: string): Promise<void> {
     const enviada = await sock.sendMessage(jid, { text: texto });
+    if (enviada?.key.id) {
+      mensagensDoBot.add(enviada.key.id);
+    }
+  }
+
+  async function enviarDocumentoParaJid(
+    jid: string,
+    buffer: Buffer,
+    nomeArquivo: string,
+    mimetype: string,
+  ): Promise<void> {
+    const enviada = await sock.sendMessage(jid, { document: buffer, fileName: nomeArquivo, mimetype });
     if (enviada?.key.id) {
       mensagensDoBot.add(enviada.key.id);
     }
@@ -136,6 +149,14 @@ export async function conectarWhatsApp(
         return;
       }
       await enviarParaJid(jid, texto);
+    },
+    enviarDocumento: async (remetente: string, buffer: Buffer, nomeArquivo: string, mimetype: string) => {
+      const jid = jidsParaResponder.get(remetente);
+      if (!jid) {
+        console.error(`Nenhuma conversa conhecida ainda com ${remetente}; documento não enviado:`, nomeArquivo);
+        return;
+      }
+      await enviarDocumentoParaJid(jid, buffer, nomeArquivo, mimetype);
     },
   };
 }

@@ -1,6 +1,6 @@
 import { buscarEntriesPorPeriodo, consultarUsoIA, type Entry, type Categoria } from "./db";
 
-const NOMES_MES = [
+export const NOMES_MES = [
   "janeiro", "fevereiro", "março", "abril", "maio", "junho",
   "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
 ];
@@ -9,7 +9,7 @@ function formatarDataLocal(ano: number, mes: number, dia: number): string {
   return `${ano}-${String(mes).padStart(2, "0")}-${String(dia).padStart(2, "0")}`;
 }
 
-function obterIntervaloMes(offsetMeses: number): { inicio: string; fim: string; ano: number; mes: number } {
+export function obterIntervaloMes(offsetMeses: number): { inicio: string; fim: string; ano: number; mes: number } {
   const agora = new Date();
   let ano = agora.getFullYear();
   let mes = agora.getMonth() + 1 + offsetMeses;
@@ -43,17 +43,17 @@ function formatarDolar(valor: number): string {
   return valor.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 4 });
 }
 
-function formatarQuantidade(valor: number): string {
+export function formatarQuantidade(valor: number): string {
   return valor.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
 }
 
-interface ResumoCategoria {
+export interface ResumoCategoria {
   quantidadeRegistros: number;
   custoTotal: number;
   quantidadesPorUnidade: Map<string, number>;
 }
 
-function montarResumo(entries: Entry[]): {
+export function montarResumo(entries: Entry[]): {
   totalGasto: number;
   colhidoPorUnidade: Map<string, number>;
   porCategoria: Map<Categoria, ResumoCategoria>;

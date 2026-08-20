@@ -9,6 +9,7 @@ import {
   gerarRelatorioUsoIAMesPassado,
   formatarMoeda,
 } from "./reports";
+import { gerarPdfRelatorioMesAtual, gerarPdfRelatorioMesPassado } from "./pdf";
 
 // Aceita uma lista separada por vírgula (WHATSAPP_NUMEROS_AUTORIZADOS) ou,
 // por compatibilidade, a variável antiga de um único número.
@@ -87,6 +88,7 @@ async function processarMensagem(
   texto: string,
   remetente: string,
   enviarMensagem: (remetente: string, texto: string) => Promise<void>,
+  enviarDocumento: (remetente: string, buffer: Buffer, nomeArquivo: string, mimetype: string) => Promise<void>,
 ): Promise<void> {
   const normalizado = normalizarTexto(texto);
   const responder = (resposta: string) => enviarMensagem(remetente, resposta);
@@ -100,9 +102,19 @@ async function processarMensagem(
   }
 
   if (normalizado.includes("relatorio")) {
-    const relatorio = normalizado.includes("passado")
-      ? gerarRelatorioMesPassado()
-      : gerarRelatorioMesAtual();
+    const querPdf = normalizado.includes("pdf");
+    const querMesPassado = normalizado.includes("passado");
+
+    if (querPdf) {
+      await responder("📄 Gerando o PDF, só um instante...");
+      const { buffer, nomeArquivo } = querMesPassado
+        ? await gerarPdfRelatorioMesPassado()
+        : await gerarPdfRelatorioMesAtual();
+      await enviarDocumento(remetente, buffer, nomeArquivo, "application/pdf");
+      return;
+    }
+
+    const relatorio = querMesPassado ? gerarRelatorioMesPassado() : gerarRelatorioMesAtual();
     await responder(relatorio);
     return;
   }
@@ -146,9 +158,9 @@ async function processarMensagem(
 async function main(): Promise<void> {
   initDb();
 
-  const { enviarMensagem } = await conectarWhatsApp(numerosAutorizados, async (texto, remetente) => {
+  const { enviarMensagem, enviarDocumento } = await conectarWhatsApp(numerosAutorizados, async (texto, remetente) => {
     try {
-      await processarMensagem(texto, remetente, enviarMensagem);
+      await processarMensagem(texto, remetente, enviarMensagem, enviarDocumento);
     } catch (err) {
       console.error("Erro ao processar mensagem:", err);
       await enviarMensagem(remetente, "Ocorreu um erro ao processar sua mensagem. Tente novamente.");
