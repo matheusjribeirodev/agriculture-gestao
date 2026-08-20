@@ -1,9 +1,10 @@
 # Bot de Gestão Rural (WhatsApp)
 
 Protótipo local de bot de WhatsApp para gestão de custos e atividades de uma propriedade
-cafeeira (adubação, colheita, poda, defensivos, mão de obra, vendas). O produtor manda uma
-mensagem em linguagem natural, o bot interpreta com IA, pede confirmação e grava num
-banco SQLite local.
+rural — cobre tanto a lavoura de café (adubação, colheita, poda, defensivos) quanto o
+resto da propriedade (manutenção, combustível, energia, água), sempre separados por área
+para não misturar os números. O produtor manda uma mensagem em linguagem natural, o bot
+interpreta com IA, pede confirmação e grava num banco SQLite local.
 
 **Status:** MVP para validar o conceito. Roda só localmente (`npm run dev`), sem deploy,
 sem hospedagem, sem webhook — conexão direta com o WhatsApp via QR code.
@@ -61,30 +62,36 @@ pra conversa de quem mandou a mensagem, nunca é cruzada entre os dois.
 ## Fluxo
 
 1. Produtor manda uma mensagem em texto livre, ex: *"Comprei 10 sacos de NPK por R$1500 no talhão 3"*.
-2. O bot manda o texto para a Claude, que extrai os dados estruturados (schema abaixo) e responde com um resumo:
+2. O bot manda o texto para a IA, que decide a área (`cafe`, `propriedade` ou `outro`) e
+   extrai os dados estruturados (schema abaixo), respondendo com um resumo:
    ```
    Entendi o seguinte:
 
-   Data: 2026-08-19
+   Data: 19/08/2026
+   Área: cafe
    Categoria: adubacao
    Item: NPK 20-05-20
    Quantidade: 10 sacos
    Custo: R$ 1.500,00
-   Talhão: Talhão 3
+   Local: Talhão 3
 
    Confirma? Responda "sim" ou "corrigir".
    ```
+   Para uma venda, a linha correspondente aparece como **Receita** em vez de **Custo** —
+   venda é entrada de dinheiro, não gasto.
 3. Se a resposta for **"sim"** (case-insensitive), o registro é gravado no banco e o bot responde "Registrado!".
 4. Qualquer outra resposta descarta o registro pendente e trata a mensagem seguinte como uma nova tentativa de extração.
 5. Comandos especiais, reconhecidos direto por texto (não passam pela IA):
    - **"relatório"** ou **"relatorio"** → resumo do mês atual (texto)
    - **"relatório mês passado"** → resumo do mês anterior (texto)
-   - **"relatório em pdf"** / **"relatório pdf mês passado"** → mesma coisa, como um PDF anexado (ver seção "Relatório em PDF")
+   - **"relatório em pdf"** / **"relatório pdf mês passado"** → mesma coisa, como um PDF anexado (ver seção "Relatório em PDF") — mas isso é só um atalho de texto; pedir o PDF de qualquer outro jeito ("manda um pdf", "pode gerar um arquivo?") também funciona, via ferramenta de IA
    - **"uso de ia"** → chamadas, tokens e custo estimado do mês atual (ver seção "Uso e custo de IA")
    - **"uso de ia mês passado"** → mesma coisa, mês anterior
 
-   O relatório mostra: total gasto (soma de custo, exceto categoria `venda`), total
-   colhido (somado por unidade) e um detalhamento por categoria.
+   O relatório é organizado por área — cada uma com suas próprias despesas, receita
+   (vendas) e total colhido, detalhado por categoria — e termina com um resumo geral
+   (despesa total, receita total, saldo). Áreas sem nenhum lançamento no período não
+   aparecem.
 
 ## Perguntas sobre os dados
 
@@ -93,18 +100,22 @@ registrado — sempre com dados reais do SQLite, nunca inventados. Exemplos:
 
 - "Quanto gastei com adubo esse mês?"
 - "Quanto colhi este mês?"
-- "Qual talhão produziu mais?"
+- "Qual local produziu mais?"
 - "Quanto vendi esse ano?"
 - "Quanto gastei no talhão 3?"
+- "Quanto gastei na propriedade esse mês?" (fora do café)
 
 Como funciona: a IA (Gemini ou Claude, ver seção abaixo) decide qual consulta chamar
 (`consultar_gastos`, `consultar_producao`, `consultar_vendas` ou `consultar_registros`,
 definidas em `src/tools.ts`) e com quais parâmetros (incluindo o período, resolvido a
-partir de expressões como "mês passado" ou "este ano"), mas quem executa a query no
-banco é sempre o código em `src/db.ts` — a IA nunca roda SQL diretamente. Se faltar uma
-informação (ex: o período), o bot pergunta antes de responder, e se não houver dados
-para o período pedido, ele diz isso em vez de estimar. Mensagens sem nenhuma das duas
-intenções (registrar ou consultar) — tipo um simples "oi" — recebem uma resposta
+partir de expressões como "mês passado" ou "este ano", e opcionalmente a área e o
+local), mas quem executa a query no banco é sempre o código em `src/db.ts` — a IA nunca
+roda SQL diretamente. Quando o produtor não pede uma área específica, as consultas
+retornam o total geral **e** o detalhamento por área junto — nunca um número só
+misturando café com o resto da propriedade sem dizer a origem. Se faltar uma informação
+(ex: o período), o bot pergunta antes de responder, e se não houver dados para o
+período pedido, ele diz isso em vez de estimar. Mensagens sem nenhuma das intenções
+acima (registrar, consultar, pedir PDF) — tipo um simples "oi" — recebem uma resposta
 conversacional direta.
 
 ### Preço do café (mercado externo)
@@ -161,10 +172,18 @@ mas avisa que o custo daquele provider não pôde ser estimado, em vez de chutar
 
 Mande **"relatório em pdf"** (ou "relatório pdf mês passado") que o bot gera um PDF
 (`src/pdf.ts`, biblioteca `pdfkit` — sem depender de navegador/Chromium, leve o
-suficiente pra rodar numa VM de 1GB) com cabeçalho, cartões de resumo (total gasto,
-total colhido) e uma tabela detalhada por categoria, e manda como arquivo anexado no
-WhatsApp. Usa os mesmos dados/cálculos do relatório em texto (`src/reports.ts`) — não
-tem nenhuma IA envolvida na geração, então não gera custo além do processamento local.
+suficiente pra rodar numa VM de 1GB) com cabeçalho, cartões de resumo (despesa total,
+receita total, saldo, total colhido), uma seção por área com sua própria tabela
+(categoria, registros, quantidade, custo/receita) e rodapé com data de geração e
+numeração de página. Usa os mesmos dados/cálculos do relatório em texto
+(`src/reports.ts`).
+
+Esse comando exato é só um atalho rápido (evita gastar tokens de IA no caso óbvio) — na
+prática, qualquer pedido de PDF/arquivo/documento passa pela ferramenta de IA
+`gerar_relatorio_pdf` (`src/tools.ts`), então frases como "manda esse relatório em pdf"
+ou "pode gerar um pdf só do café?" também funcionam, com ou sem filtro de área. Em
+nenhum dos dois caminhos há IA envolvida na geração do PDF em si (só, no caso do
+segundo, para entender o pedido) — o desenho e os cálculos são sempre locais.
 
 ## Schema do banco (`entries`, SQLite em `data/gestao.db`)
 
@@ -172,15 +191,25 @@ tem nenhuma IA envolvida na geração, então não gera custo além do processam
 |-----------------------|---------|--------------------------------------------------------------------------|
 | `id`                  | INTEGER | autoincrement                                                            |
 | `data`                | TEXT    | `YYYY-MM-DD`                                                             |
-| `categoria`           | TEXT    | `adubacao \| colheita \| poda \| defensivo \| mao_de_obra \| venda \| outro` |
+| `area`                | TEXT    | `cafe \| propriedade \| outro`                                          |
+| `categoria`           | TEXT    | depende da área — ver `CATEGORIAS_POR_AREA` em `src/db.ts`              |
 | `item`                | TEXT    | nullable                                                                 |
 | `quantidade`          | REAL    | nullable                                                                 |
 | `unidade`             | TEXT    | nullable (ex: "sacos", "kg", "litros")                                  |
-| `custo`               | REAL    | nullable                                                                 |
-| `talhao`              | TEXT    | nullable                                                                 |
+| `custo`               | REAL    | nullable — para categoria `venda`, é o valor recebido (receita)         |
+| `local`               | TEXT    | nullable — local dentro da propriedade (ex: "Talhão 3", "Curral")       |
 | `observacao`          | TEXT    | nullable                                                                 |
 | `mensagem_original`   | TEXT    | texto bruto enviado pelo produtor, para auditoria                       |
 | `criado_em`           | TEXT    | timestamp ISO de quando o registro foi gravado                          |
+
+Categorias por área: `cafe` → `adubacao, colheita, poda, defensivo, mao_de_obra, venda,
+outro` · `propriedade` → `manutencao, combustivel, energia, agua, insumo, mao_de_obra,
+venda, outro` · `outro` → `mao_de_obra, venda, outro`.
+
+> Bancos criados antes deste campo existir tinham só `talhao` (sem `area`) — a migração
+> em `src/db.ts` (`migrarSchemaEntries`) roda automaticamente no boot, renomeia a coluna
+> para `local` e marca todo registro antigo como `area = 'cafe'` (era tudo café até
+> então). Idempotente, não precisa rodar nada manualmente.
 
 ## Estrutura de pastas
 
@@ -191,13 +220,14 @@ src/
     gemini-provider.ts    # implementação via @google/genai
     claude-provider.ts    # implementação via @anthropic-ai/sdk
     router.ts             # AIRouter: escolhe o provider e faz fallback
-  db.ts        # setup e queries do SQLite (registro + consultas)
+  db.ts        # setup/migração do schema e queries do SQLite (registro + consultas, por área)
   tools.ts     # ferramentas expostas à IA (tool-use) e o despachante que as executa
-  parser.ts    # monta o prompt/ferramentas e delega ao AIRouter (registrar, consultar ou conversar)
+  parser.ts    # monta o prompt/ferramentas e delega ao AIRouter (registrar, consultar, gerar PDF ou conversar)
+  format.ts    # formatação de data para exibição (YYYY-MM-DD -> dd/mm/aaaa)
   audio.ts     # transcrição de áudio via Gemini (entende OGG/Opus nativamente)
   whatsapp.ts  # conexão Baileys (QR, filtro de remetente, áudio, envio/recebimento)
-  reports.ts   # geração dos relatórios mensais (texto)
-  pdf.ts       # geração do relatório mensal em PDF (pdfkit)
+  reports.ts   # geração dos relatórios mensais (texto), agrupados por área
+  pdf.ts       # geração do relatório mensal em PDF (pdfkit), agrupado por área
   index.ts     # orquestração (fluxo de confirmação, comandos especiais)
 auth_info/     # sessão do WhatsApp (gerada automaticamente, git-ignored)
 data/          # banco SQLite (gerado automaticamente, git-ignored)
@@ -223,8 +253,9 @@ recusados com um aviso.
 
 ## Limitações conhecidas do MVP
 
-- Vários números autorizados, mas sem conceito de propriedades/talhões separados por
-  usuário — todo mundo em `WHATSAPP_NUMEROS_AUTORIZADOS` vê e registra na mesma base.
+- Vários números autorizados, mas sem conceito de propriedades separadas por usuário —
+  todo mundo em `WHATSAPP_NUMEROS_AUTORIZADOS` vê e registra na mesma base (a separação
+  por `area`/`local` organiza os relatórios, mas não isola produtores diferentes).
 - Confirmação pendente e memória de acompanhamento de perguntas ficam em memória
   (`Map`); reiniciar o bot descarta qualquer confirmação ou pergunta em aberto.
 - Sem controle de estoque — não há como responder "quantas sacas ainda tenho".

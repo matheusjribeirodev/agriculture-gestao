@@ -1,16 +1,23 @@
 import { z } from "zod";
 import {
   CATEGORIAS,
+  AREAS,
+  CATEGORIAS_POR_AREA,
   consultarGastos,
   consultarProducao,
   consultarVendas,
   consultarRegistros,
   type Categoria,
+  type Area,
 } from "./db";
 import { buscarCotacaoCafe } from "./cotacao";
 import type { FerramentaDef } from "./ai/types";
 
 const CATEGORIAS_SEM_VENDA = CATEGORIAS.filter((c) => c !== "venda") as [Categoria, ...Categoria[]];
+
+const DESCRICAO_AREA_CATEGORIA = AREAS.map(
+  (area) => `${area}: ${CATEGORIAS_POR_AREA[area].join(", ")}`,
+).join(" | ");
 
 export const FERRAMENTAS: FerramentaDef[] = [
   {
@@ -21,28 +28,34 @@ export const FERRAMENTAS: FerramentaDef[] = [
       type: "object",
       properties: {
         data: { type: "string", description: "Data do evento no formato YYYY-MM-DD. Se não mencionada, use a data de hoje." },
-        categoria: { type: "string", enum: CATEGORIAS },
+        area: {
+          type: "string",
+          enum: AREAS,
+          description: `Área da propriedade a que o registro pertence. "cafe" para atividades da lavoura de café, "propriedade" para manutenção/infraestrutura geral (trator, cerca, energia, água), "outro" para o que não encaixa nas duas. Categorias válidas por área: ${DESCRICAO_AREA_CATEGORIA}.`,
+        },
+        categoria: { type: "string", enum: CATEGORIAS, description: "Deve ser uma categoria válida para a área escolhida." },
         item: { type: ["string", "null"], description: "Nome do insumo, produto ou atividade." },
         quantidade: { type: ["number", "null"] },
         unidade: { type: ["string", "null"], description: 'Ex: "sacos", "kg", "litros", "diárias".' },
-        custo: { type: ["number", "null"] },
-        talhao: { type: ["string", "null"] },
+        custo: { type: ["number", "null"], description: "Valor em reais. Para categoria 'venda', é o valor recebido (receita), não uma despesa." },
+        local: { type: ["string", "null"], description: 'Local dentro da propriedade, ex: "Talhão 3", "Curral", "Galpão", "Represa".' },
         observacao: { type: ["string", "null"] },
       },
-      required: ["data", "categoria", "item", "quantidade", "unidade", "custo", "talhao", "observacao"],
+      required: ["data", "area", "categoria", "item", "quantidade", "unidade", "custo", "local", "observacao"],
     },
   },
   {
     nome: "consultar_gastos",
     descricao:
-      "Consulta o total gasto (R$) e o detalhamento por categoria em um período. Use para perguntas sobre quanto foi gasto, com o quê, ou em qual talhão. Não inclui vendas (isso é receita, não gasto).",
+      "Consulta o total gasto (R$) e o detalhamento por categoria em um período. Use para perguntas sobre quanto foi gasto, com o quê, ou em qual local. Não inclui vendas (isso é receita, não gasto). Sempre retorna o detalhamento por área — se o produtor não pediu uma área específica, informe o total geral E a divisão por área, nunca um número só misturando tudo.",
     schema: {
       type: "object",
       properties: {
         inicio: { type: "string", description: "Data inicial do período, YYYY-MM-DD." },
         fim: { type: "string", description: "Data final do período, YYYY-MM-DD." },
         categoria: { type: "string", enum: CATEGORIAS_SEM_VENDA, description: "Opcional: filtrar por uma categoria de gasto específica." },
-        talhao: { type: "string", description: "Opcional: filtrar por talhão." },
+        local: { type: "string", description: "Opcional: filtrar por local/talhão." },
+        area: { type: "string", enum: AREAS, description: "Opcional: filtrar por área (cafe, propriedade ou outro)." },
       },
       required: ["inicio", "fim"],
     },
@@ -50,13 +63,14 @@ export const FERRAMENTAS: FerramentaDef[] = [
   {
     nome: "consultar_producao",
     descricao:
-      "Consulta a produção colhida (por unidade) em um período, com detalhamento por talhão, dias com colheita e o melhor dia. Use para perguntas sobre quanto foi colhido/produzido, ou qual talhão produziu mais.",
+      "Consulta a produção colhida (por unidade) em um período, com detalhamento por área, por local e o melhor dia. Use para perguntas sobre quanto foi colhido/produzido, ou qual local produziu mais.",
     schema: {
       type: "object",
       properties: {
         inicio: { type: "string", description: "Data inicial do período, YYYY-MM-DD." },
         fim: { type: "string", description: "Data final do período, YYYY-MM-DD." },
-        talhao: { type: "string", description: "Opcional: filtrar por talhão." },
+        local: { type: "string", description: "Opcional: filtrar por local/talhão." },
+        area: { type: "string", enum: AREAS, description: "Opcional: filtrar por área (cafe, propriedade ou outro)." },
       },
       required: ["inicio", "fim"],
     },
@@ -64,12 +78,13 @@ export const FERRAMENTAS: FerramentaDef[] = [
   {
     nome: "consultar_vendas",
     descricao:
-      "Consulta o valor total vendido e as quantidades por unidade em um período. Use para perguntas sobre quanto foi vendido ou faturado.",
+      "Consulta o valor total vendido e as quantidades por unidade em um período. Use para perguntas sobre quanto foi vendido ou faturado. Sempre retorna o detalhamento por área.",
     schema: {
       type: "object",
       properties: {
         inicio: { type: "string", description: "Data inicial do período, YYYY-MM-DD." },
         fim: { type: "string", description: "Data final do período, YYYY-MM-DD." },
+        area: { type: "string", enum: AREAS, description: "Opcional: filtrar por área (cafe, propriedade ou outro)." },
       },
       required: ["inicio", "fim"],
     },
@@ -77,14 +92,15 @@ export const FERRAMENTAS: FerramentaDef[] = [
   {
     nome: "consultar_registros",
     descricao:
-      "Lista registros brutos em um período, opcionalmente filtrados por categoria e/ou talhão. Use para perguntas abertas que as outras ferramentas não cobrem, como 'resumo da propriedade' ou 'meus últimos registros'.",
+      "Lista registros brutos em um período, opcionalmente filtrados por categoria, local e/ou área. Use para perguntas abertas que as outras ferramentas não cobrem, como 'resumo da propriedade' ou 'meus últimos registros'.",
     schema: {
       type: "object",
       properties: {
         inicio: { type: "string", description: "Data inicial do período, YYYY-MM-DD." },
         fim: { type: "string", description: "Data final do período, YYYY-MM-DD." },
         categoria: { type: "string", enum: CATEGORIAS },
-        talhao: { type: "string" },
+        local: { type: "string" },
+        area: { type: "string", enum: AREAS },
         limite: { type: "number", description: "Número máximo de registros a retornar (padrão 20, máximo 100)." },
       },
       required: ["inicio", "fim"],
@@ -99,14 +115,38 @@ export const FERRAMENTAS: FerramentaDef[] = [
       properties: {},
     },
   },
+  {
+    nome: "gerar_relatorio_pdf",
+    descricao:
+      "Gera e envia um PDF com o relatório de gastos, receitas e produção do período pedido. Use sempre que o produtor pedir o relatório em PDF, arquivo, documento para salvar/imprimir — de qualquer jeito que ele formular o pedido (não só a frase exata 'relatório em pdf').",
+    schema: {
+      type: "object",
+      properties: {
+        periodo: {
+          type: "string",
+          enum: ["mes_atual", "mes_passado"],
+          description: "Período do relatório. Se não mencionado, use 'mes_atual'.",
+        },
+        area: { type: "string", enum: AREAS, description: "Opcional: gerar o PDF só de uma área específica. Se não pedido, inclui todas." },
+      },
+      required: [],
+    },
+  },
 ];
 
 const FiltroSchema = z.object({
   inicio: z.string(),
   fim: z.string(),
   categoria: z.enum(CATEGORIAS as [Categoria, ...Categoria[]]).optional(),
-  talhao: z.string().optional(),
+  local: z.string().optional(),
+  area: z.enum(AREAS as [Area, ...Area[]]).optional(),
   limite: z.number().optional(),
+});
+
+const FiltroVendasSchema = z.object({
+  inicio: z.string(),
+  fim: z.string(),
+  area: z.enum(AREAS as [Area, ...Area[]]).optional(),
 });
 
 export interface ResultadoFerramenta {
@@ -123,7 +163,7 @@ export async function executarFerramenta(nome: string, input: unknown): Promise<
       case "consultar_producao":
         return { ferramenta: nome, resultado: consultarProducao(FiltroSchema.parse(input)) };
       case "consultar_vendas":
-        return { ferramenta: nome, resultado: consultarVendas(FiltroSchema.parse(input)) };
+        return { ferramenta: nome, resultado: consultarVendas(FiltroVendasSchema.parse(input)) };
       case "consultar_registros":
         return { ferramenta: nome, resultado: consultarRegistros(FiltroSchema.parse(input)) };
       case "consultar_preco_cafe":

@@ -9,6 +9,7 @@ import {
   gerarRelatorioUsoIAMesPassado,
   formatarMoeda,
 } from "./reports";
+import { formatarDataBR } from "./format";
 import { gerarPdfRelatorioMesAtual, gerarPdfRelatorioMesPassado } from "./pdf";
 
 // Aceita uma lista separada por vírgula (WHATSAPP_NUMEROS_AUTORIZADOS) ou,
@@ -70,14 +71,23 @@ function ehConfirmacaoPositiva(normalizado: string): boolean {
 }
 
 function formatarResumo(entrada: EntradaExtraida): string {
-  const linhas = ["Entendi o seguinte:", "", `Data: ${entrada.data}`, `Categoria: ${entrada.categoria}`];
+  const linhas = [
+    "Entendi o seguinte:",
+    "",
+    `Data: ${formatarDataBR(entrada.data)}`,
+    `Área: ${entrada.area}`,
+    `Categoria: ${entrada.categoria}`,
+  ];
 
   if (entrada.item) linhas.push(`Item: ${entrada.item}`);
   if (entrada.quantidade !== null) {
     linhas.push(`Quantidade: ${entrada.quantidade}${entrada.unidade ? " " + entrada.unidade : ""}`);
   }
-  if (entrada.custo !== null) linhas.push(`Custo: ${formatarMoeda(entrada.custo)}`);
-  if (entrada.talhao) linhas.push(`Talhão: ${entrada.talhao}`);
+  if (entrada.custo !== null) {
+    const rotulo = entrada.categoria === "venda" ? "Receita" : "Custo";
+    linhas.push(`${rotulo}: ${formatarMoeda(entrada.custo)}`);
+  }
+  if (entrada.local) linhas.push(`Local: ${entrada.local}`);
   if (entrada.observacao) linhas.push(`Observação: ${entrada.observacao}`);
 
   linhas.push("", 'Confirma? Responda "sim" ou "corrigir".');
@@ -146,6 +156,16 @@ async function processarMensagem(
   if (resultado.tipo === "registrar") {
     pendentes.set(remetente, { extraida: resultado.dados, mensagemOriginal: texto });
     await responder(formatarResumo(resultado.dados));
+    return;
+  }
+
+  if (resultado.tipo === "gerar_pdf") {
+    await responder("📄 Gerando o PDF, só um instante...");
+    const { buffer, nomeArquivo } =
+      resultado.periodo === "mes_passado"
+        ? await gerarPdfRelatorioMesPassado(resultado.area)
+        : await gerarPdfRelatorioMesAtual(resultado.area);
+    await enviarDocumento(remetente, buffer, nomeArquivo, "application/pdf");
     return;
   }
 

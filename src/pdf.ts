@@ -1,6 +1,23 @@
 import PDFDocument from "pdfkit";
-import { buscarEntriesPorPeriodo, type Entry, type Categoria } from "./db";
-import { NOMES_MES, montarResumo, formatarMoeda, formatarQuantidade, obterIntervaloMes } from "./reports";
+import { buscarEntriesPorPeriodo, AREAS, type Entry, type Categoria, type Area } from "./db";
+import {
+  NOMES_MES,
+  montarResumoPorArea,
+  montarResumoGeral,
+  formatarMoeda,
+  formatarQuantidade,
+  obterIntervaloMes,
+  type ResumoArea,
+} from "./reports";
+
+// Nomes de área sem emoji: a fonte padrão do pdfkit (Helvetica/WinAnsi) não
+// tem glifos pra emoji e renderiza lixo no PDF — só o relatório em texto
+// (WhatsApp) usa a versão com emoji de NOMES_AREA.
+const NOMES_AREA_PDF: Record<Area, string> = {
+  cafe: "Café",
+  propriedade: "Propriedade",
+  outro: "Outro",
+};
 
 const COR_PRIMARIA = "#3b2415"; // marrom café escuro
 const COR_SECUNDARIA = "#8a6d3b"; // marrom claro
@@ -17,32 +34,46 @@ const NOMES_CATEGORIA: Record<Categoria, string> = {
   mao_de_obra: "Mão de obra",
   venda: "Venda",
   outro: "Outro",
+  manutencao: "Manutenção",
+  combustivel: "Combustível",
+  energia: "Energia",
+  agua: "Água",
+  insumo: "Insumo",
 };
 
 function capitalizar(texto: string): string {
   return texto.charAt(0).toUpperCase() + texto.slice(1);
 }
 
-function gerarPdfRelatorio(ano: number, mes: number, entries: Entry[]): Promise<Buffer> {
+function gerarPdfRelatorio(ano: number, mes: number, entries: Entry[], area?: Area): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: "A4", margin: 50 });
+    const doc = new PDFDocument({ size: "A4", margin: 50, bufferPages: true });
     const chunks: Buffer[] = [];
     doc.on("data", (chunk) => chunks.push(chunk));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
-    desenharRelatorio(doc, ano, mes, entries);
+    desenharRelatorio(doc, ano, mes, entries, area);
+
+    const larguraPagina = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+    const paginas = doc.bufferedPageRange();
+    for (let i = paginas.start; i < paginas.start + paginas.count; i++) {
+      doc.switchToPage(i);
+      desenharRodape(doc, larguraPagina, i + 1, paginas.count);
+    }
+
     doc.end();
   });
 }
 
-function desenharCabecalho(doc: PDFKit.PDFDocument, nomeMes: string, ano: number): void {
+function desenharCabecalho(doc: PDFKit.PDFDocument, nomeMes: string, ano: number, area?: Area): void {
   doc.rect(0, 0, doc.page.width, 100).fill(COR_PRIMARIA);
+  const titulo = area ? `Relatório — ${NOMES_AREA_PDF[area]}` : "Relatório de Gastos e Produção";
   doc
     .fillColor("#ffffff")
     .font("Helvetica-Bold")
     .fontSize(22)
-    .text("Relatório de Gastos e Produção", 50, 32);
+    .text(titulo, 50, 32);
   doc
     .font("Helvetica")
     .fontSize(13)
@@ -61,16 +92,16 @@ function desenharCard(
   doc
     .fillColor("#6b5a45")
     .font("Helvetica-Bold")
-    .fontSize(10)
-    .text(titulo.toUpperCase(), x + 15, y + 15);
+    .fontSize(9)
+    .text(titulo.toUpperCase(), x + 12, y + 14, { width: largura - 24 });
   doc
     .fillColor(COR_PRIMARIA)
     .font("Helvetica-Bold")
-    .fontSize(16)
-    .text(valor, x + 15, y + 36, { width: largura - 30 });
+    .fontSize(14)
+    .text(valor, x + 12, y + 38, { width: largura - 24 });
 }
 
-function desenharRodape(doc: PDFKit.PDFDocument, larguraPagina: number): void {
+function desenharRodape(doc: PDFKit.PDFDocument, larguraPagina: number, numeroPagina: number, totalPaginas: number): void {
   const dataGeracao = new Date().toLocaleString("pt-BR");
   // Posiciona dentro da área de margem segura (abaixo disso o pdfkit acha
   // que o texto não cabe e insere uma página nova automaticamente).
@@ -79,67 +110,62 @@ function desenharRodape(doc: PDFKit.PDFDocument, larguraPagina: number): void {
     .font("Helvetica")
     .fontSize(8)
     .fillColor(COR_RODAPE)
-    .text(`Gerado automaticamente em ${dataGeracao}`, 50, y, {
+    .text(`Gerado automaticamente em ${dataGeracao} — Página ${numeroPagina} de ${totalPaginas}`, 50, y, {
       width: larguraPagina,
       align: "center",
       lineBreak: false,
     });
 }
 
-function desenharRelatorio(doc: PDFKit.PDFDocument, ano: number, mes: number, entries: Entry[]): void {
-  const nomeMes = NOMES_MES[mes - 1];
-  const larguraPagina = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-
-  desenharCabecalho(doc, nomeMes, ano);
-
-  if (entries.length === 0) {
-    doc
-      .fillColor(COR_TEXTO)
-      .font("Helvetica")
-      .fontSize(12)
-      .text(`Nenhum registro encontrado em ${nomeMes}/${ano}.`, 50, 140);
-    desenharRodape(doc, larguraPagina);
-    return;
+function garantirEspaco(doc: PDFKit.PDFDocument, y: number, alturaNecessaria: number): number {
+  if (y + alturaNecessaria > doc.page.height - doc.page.margins.bottom - 30) {
+    doc.addPage();
+    return 50;
   }
+  return y;
+}
 
-  const { totalGasto, colhidoPorUnidade, porCategoria } = montarResumo(entries);
+function desenharSecaoArea(doc: PDFKit.PDFDocument, larguraPagina: number, area: Area, resumo: ResumoArea, y: number): number {
+  y = garantirEspaco(doc, y, 60);
 
-  let y = 130;
-  const larguraCard = (larguraPagina - 20) / 2;
-  desenharCard(doc, 50, y, larguraCard, "Total gasto", formatarMoeda(totalGasto));
+  doc.fillColor(COR_TEXTO).font("Helvetica-Bold").fontSize(14).text(NOMES_AREA_PDF[area], 50, y);
+  y += 20;
+
   const colhidoTexto =
-    colhidoPorUnidade.size > 0
-      ? [...colhidoPorUnidade.entries()].map(([u, q]) => `${formatarQuantidade(q)} ${u}`).join(", ")
-      : "Nenhum registro";
-  desenharCard(doc, 50 + larguraCard + 20, y, larguraCard, "Total colhido", colhidoTexto);
+    resumo.colhidoPorUnidade.size > 0
+      ? [...resumo.colhidoPorUnidade.entries()].map(([u, q]) => `${formatarQuantidade(q)} ${u}`).join(", ")
+      : null;
 
-  y += 110;
-
-  doc.fillColor(COR_TEXTO).font("Helvetica-Bold").fontSize(14).text("Detalhamento por categoria", 50, y);
-  y += 26;
+  doc.font("Helvetica").fontSize(10).fillColor(COR_TEXTO);
+  let linhaResumo = `Despesas: ${formatarMoeda(resumo.despesaTotal)}`;
+  if (resumo.receitaTotal > 0) linhaResumo += `   |   Receita: ${formatarMoeda(resumo.receitaTotal)}`;
+  if (colhidoTexto) linhaResumo += `   |   Colhido: ${colhidoTexto}`;
+  doc.text(linhaResumo, 50, y, { width: larguraPagina });
+  y += 22;
 
   const colunas = [
-    { titulo: "Categoria", largura: 150 },
-    { titulo: "Registros", largura: 80 },
-    { titulo: "Custo", largura: 110 },
-    { titulo: "Quantidade", largura: larguraPagina - 150 - 80 - 110 },
+    { titulo: "Categoria", largura: 140 },
+    { titulo: "Registros", largura: 65 },
+    { titulo: "Quantidade", largura: larguraPagina - 140 - 65 - 110 },
+    { titulo: "Custo/Receita", largura: 110 },
   ];
 
   function desenharCabecalhoTabela(): void {
-    doc.rect(50, y, larguraPagina, 24).fill(COR_SECUNDARIA);
+    doc.rect(50, y, larguraPagina, 22).fill(COR_SECUNDARIA);
     let x = 50;
-    doc.fillColor("#ffffff").font("Helvetica-Bold").fontSize(10);
+    doc.fillColor("#ffffff").font("Helvetica-Bold").fontSize(9);
     for (const col of colunas) {
-      doc.text(col.titulo, x + 6, y + 7, { width: col.largura - 12 });
+      doc.text(col.titulo, x + 6, y + 6, { width: col.largura - 12 });
       x += col.largura;
     }
-    y += 24;
+    y += 22;
   }
 
+  y = garantirEspaco(doc, y, 22);
   desenharCabecalhoTabela();
 
   let linhaAlternada = false;
-  for (const [categoria, resumo] of porCategoria) {
+  for (const [categoria, resumoCat] of resumo.porCategoria) {
     const alturaLinha = 22;
     if (y + alturaLinha > doc.page.height - doc.page.margins.bottom - 30) {
       doc.addPage();
@@ -152,26 +178,64 @@ function desenharRelatorio(doc: PDFKit.PDFDocument, ano: number, mes: number, en
     linhaAlternada = !linhaAlternada;
 
     const quantidadeTexto =
-      resumo.quantidadesPorUnidade.size > 0
-        ? [...resumo.quantidadesPorUnidade.entries()].map(([u, q]) => `${formatarQuantidade(q)} ${u}`).join(", ")
+      resumoCat.quantidadesPorUnidade.size > 0
+        ? [...resumoCat.quantidadesPorUnidade.entries()].map(([u, q]) => `${formatarQuantidade(q)} ${u}`).join(", ")
         : "-";
+    const valorTexto = resumoCat.valorTotal > 0 ? formatarMoeda(resumoCat.valorTotal) : "-";
 
     let x = 50;
-    doc.fillColor(COR_TEXTO).font("Helvetica").fontSize(10);
+    doc.fillColor(COR_TEXTO).font("Helvetica").fontSize(9);
     doc.text(NOMES_CATEGORIA[categoria] ?? categoria, x + 6, y + 6, { width: colunas[0].largura - 12 });
     x += colunas[0].largura;
-    doc.text(String(resumo.quantidadeRegistros), x + 6, y + 6, { width: colunas[1].largura - 12 });
+    doc.text(String(resumoCat.quantidadeRegistros), x + 6, y + 6, { width: colunas[1].largura - 12 });
     x += colunas[1].largura;
-    doc.text(resumo.custoTotal > 0 ? formatarMoeda(resumo.custoTotal) : "-", x + 6, y + 6, {
-      width: colunas[2].largura - 12,
-    });
+    doc.text(quantidadeTexto, x + 6, y + 6, { width: colunas[2].largura - 12 });
     x += colunas[2].largura;
-    doc.text(quantidadeTexto, x + 6, y + 6, { width: colunas[3].largura - 12 });
+    doc.text(valorTexto, x + 6, y + 6, { width: colunas[3].largura - 12 });
 
     y += alturaLinha;
   }
 
-  desenharRodape(doc, larguraPagina);
+  return y + 20;
+}
+
+function desenharRelatorio(doc: PDFKit.PDFDocument, ano: number, mes: number, entries: Entry[], area?: Area): void {
+  const nomeMes = NOMES_MES[mes - 1];
+  const larguraPagina = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+
+  desenharCabecalho(doc, nomeMes, ano, area);
+
+  if (entries.length === 0) {
+    doc
+      .fillColor(COR_TEXTO)
+      .font("Helvetica")
+      .fontSize(12)
+      .text(`Nenhum registro encontrado em ${nomeMes}/${ano}.`, 50, 140);
+    return;
+  }
+
+  const porArea = montarResumoPorArea(entries);
+  const geral = montarResumoGeral(porArea);
+
+  let y = 130;
+  const espacamento = 15;
+  const larguraCard = (larguraPagina - espacamento * 3) / 4;
+  desenharCard(doc, 50, y, larguraCard, "Despesa total", formatarMoeda(geral.despesaTotal));
+  desenharCard(doc, 50 + (larguraCard + espacamento), y, larguraCard, "Receita total", formatarMoeda(geral.receitaTotal));
+  desenharCard(doc, 50 + (larguraCard + espacamento) * 2, y, larguraCard, "Saldo", formatarMoeda(geral.receitaTotal - geral.despesaTotal));
+  const colhidoTexto =
+    geral.colhidoPorUnidade.size > 0
+      ? [...geral.colhidoPorUnidade.entries()].map(([u, q]) => `${formatarQuantidade(q)} ${u}`).join(", ")
+      : "Nenhum registro";
+  desenharCard(doc, 50 + (larguraCard + espacamento) * 3, y, larguraCard, "Total colhido", colhidoTexto);
+
+  y += 110;
+
+  for (const areaAtual of AREAS) {
+    const resumoArea = porArea.get(areaAtual);
+    if (!resumoArea) continue;
+    y = desenharSecaoArea(doc, larguraPagina, areaAtual, resumoArea, y);
+  }
 }
 
 export interface RelatorioPdf {
@@ -179,17 +243,19 @@ export interface RelatorioPdf {
   nomeArquivo: string;
 }
 
-async function gerarRelatorioPdfComOffset(offsetMeses: number): Promise<RelatorioPdf> {
+async function gerarRelatorioPdfComOffset(offsetMeses: number, area?: Area): Promise<RelatorioPdf> {
   const { inicio, fim, ano, mes } = obterIntervaloMes(offsetMeses);
-  const entries = buscarEntriesPorPeriodo(inicio, fim);
-  const buffer = await gerarPdfRelatorio(ano, mes, entries);
-  return { buffer, nomeArquivo: `relatorio-rural-${ano}-${String(mes).padStart(2, "0")}.pdf` };
+  const todasEntries = buscarEntriesPorPeriodo(inicio, fim);
+  const entries = area ? todasEntries.filter((e) => e.area === area) : todasEntries;
+  const buffer = await gerarPdfRelatorio(ano, mes, entries, area);
+  const sufixoArea = area ? `-${area}` : "";
+  return { buffer, nomeArquivo: `relatorio-rural-${ano}-${String(mes).padStart(2, "0")}${sufixoArea}.pdf` };
 }
 
-export function gerarPdfRelatorioMesAtual(): Promise<RelatorioPdf> {
-  return gerarRelatorioPdfComOffset(0);
+export function gerarPdfRelatorioMesAtual(area?: Area): Promise<RelatorioPdf> {
+  return gerarRelatorioPdfComOffset(0, area);
 }
 
-export function gerarPdfRelatorioMesPassado(): Promise<RelatorioPdf> {
-  return gerarRelatorioPdfComOffset(-1);
+export function gerarPdfRelatorioMesPassado(area?: Area): Promise<RelatorioPdf> {
+  return gerarRelatorioPdfComOffset(-1, area);
 }

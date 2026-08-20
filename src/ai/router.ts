@@ -55,6 +55,7 @@ export interface ParametrosInterpretacao {
 
 export type ResultadoRouter =
   | { tipo: "registrar"; chamada: ChamadaFerramenta; provider: string }
+  | { tipo: "gerar_pdf"; chamada: ChamadaFerramenta; provider: string }
   | { tipo: "texto"; texto: string; provider: string; teveFerramentas: boolean };
 
 const MAX_RODADAS = 4;
@@ -98,6 +99,11 @@ export class AIRouter {
       const chamadaRegistrar = resposta.chamadas.find((c) => c.nome === "registrar_entrada");
       if (chamadaRegistrar) {
         return { tipo: "registrar", chamada: chamadaRegistrar, provider: provider.nome };
+      }
+
+      const chamadaPdf = resposta.chamadas.find((c) => c.nome === "gerar_relatorio_pdf");
+      if (chamadaPdf) {
+        return { tipo: "gerar_pdf", chamada: chamadaPdf, provider: provider.nome };
       }
 
       const resultados = await Promise.all(resposta.chamadas.map((c) => executarFerramenta(c.nome, c.input)));

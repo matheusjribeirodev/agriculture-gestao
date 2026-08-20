@@ -2,6 +2,10 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import path from "node:path";
 import fs from "node:fs";
 
+export type Area = "cafe" | "propriedade" | "outro";
+
+export const AREAS: Area[] = ["cafe", "propriedade", "outro"];
+
 export type Categoria =
   | "adubacao"
   | "colheita"
@@ -9,7 +13,12 @@ export type Categoria =
   | "defensivo"
   | "mao_de_obra"
   | "venda"
-  | "outro";
+  | "outro"
+  | "manutencao"
+  | "combustivel"
+  | "energia"
+  | "agua"
+  | "insumo";
 
 export const CATEGORIAS: Categoria[] = [
   "adubacao",
@@ -19,16 +28,30 @@ export const CATEGORIAS: Categoria[] = [
   "mao_de_obra",
   "venda",
   "outro",
+  "manutencao",
+  "combustivel",
+  "energia",
+  "agua",
+  "insumo",
 ];
+
+// Categorias válidas por área — usado tanto para orientar a IA (prompt/schema
+// da ferramenta) quanto para corrigir uma combinação inválida antes de salvar.
+export const CATEGORIAS_POR_AREA: Record<Area, Categoria[]> = {
+  cafe: ["adubacao", "colheita", "poda", "defensivo", "mao_de_obra", "venda", "outro"],
+  propriedade: ["manutencao", "combustivel", "energia", "agua", "insumo", "mao_de_obra", "venda", "outro"],
+  outro: ["mao_de_obra", "venda", "outro"],
+};
 
 export interface EntradaParaSalvar {
   data: string;
+  area: Area;
   categoria: Categoria;
   item: string | null;
   quantidade: number | null;
   unidade: string | null;
   custo: number | null;
-  talhao: string | null;
+  local: string | null;
   observacao: string | null;
   mensagem_original: string;
 }
@@ -47,22 +70,43 @@ const DB_PATH = path.join(DATA_DIR, "gestao.db");
 
 export const db = new DatabaseSync(DB_PATH);
 
+function colunaExiste(tabela: string, coluna: string): boolean {
+  const linhas = db.prepare(`PRAGMA table_info(${tabela})`).all() as unknown as { name: string }[];
+  return linhas.some((l) => l.name === coluna);
+}
+
+// Migração idempotente: bancos criados antes deste schema têm `talhao` e não
+// têm `area`. Bancos novos já nascem com `area`/`local` pelo CREATE TABLE
+// abaixo, então essas checagens viram no-op — seguro rodar em todo boot.
+function migrarSchemaEntries(): void {
+  if (!colunaExiste("entries", "area")) {
+    db.exec(`ALTER TABLE entries ADD COLUMN area TEXT NOT NULL DEFAULT 'cafe'`);
+  }
+  if (colunaExiste("entries", "talhao") && !colunaExiste("entries", "local")) {
+    db.exec(`ALTER TABLE entries RENAME COLUMN talhao TO local`);
+  } else if (!colunaExiste("entries", "local")) {
+    db.exec(`ALTER TABLE entries ADD COLUMN local TEXT`);
+  }
+}
+
 export function initDb(): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS entries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       data TEXT NOT NULL,
+      area TEXT NOT NULL DEFAULT 'cafe',
       categoria TEXT NOT NULL,
       item TEXT,
       quantidade REAL,
       unidade TEXT,
       custo REAL,
-      talhao TEXT,
+      local TEXT,
       observacao TEXT,
       mensagem_original TEXT NOT NULL,
       criado_em TEXT NOT NULL
     )
   `);
+  migrarSchemaEntries();
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS ai_usage (
@@ -80,18 +124,19 @@ export function initDb(): void {
 export function inserirEntry(entrada: EntradaParaSalvar): number {
   const stmt = db.prepare(`
     INSERT INTO entries
-      (data, categoria, item, quantidade, unidade, custo, talhao, observacao, mensagem_original, criado_em)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (data, area, categoria, item, quantidade, unidade, custo, local, observacao, mensagem_original, criado_em)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const criadoEm = new Date().toISOString();
   const resultado = stmt.run(
     entrada.data,
+    entrada.area,
     entrada.categoria,
     entrada.item,
     entrada.quantidade,
     entrada.unidade,
     entrada.custo,
-    entrada.talhao,
+    entrada.local,
     entrada.observacao,
     entrada.mensagem_original,
     criadoEm,
@@ -112,11 +157,19 @@ export interface FiltroPeriodo {
   inicio: string;
   fim: string;
   categoria?: Categoria;
-  talhao?: string;
+  local?: string;
+  area?: Area;
 }
 
 export interface GastoPorCategoria {
+  area: Area;
   categoria: Categoria;
+  total: number;
+  registros: number;
+}
+
+export interface GastoPorArea {
+  area: Area;
   total: number;
   registros: number;
 }
@@ -124,40 +177,54 @@ export interface GastoPorCategoria {
 export interface ResultadoGastos {
   totalGasto: number;
   quantidadeRegistros: number;
+  porArea: GastoPorArea[];
   porCategoria: GastoPorCategoria[];
 }
 
-export function consultarGastos(filtro: FiltroPeriodo): ResultadoGastos {
-  const condicoes = ["data >= ?", "data <= ?", "categoria != 'venda'"];
+function condicoesFiltro(filtro: FiltroPeriodo): { condicoes: string[]; params: SQLInputValue[] } {
+  const condicoes = ["data >= ?", "data <= ?"];
   const params: SQLInputValue[] = [filtro.inicio, filtro.fim];
 
   if (filtro.categoria) {
     condicoes.push("categoria = ?");
     params.push(filtro.categoria);
   }
-  if (filtro.talhao) {
-    condicoes.push("talhao = ?");
-    params.push(filtro.talhao);
+  if (filtro.local) {
+    condicoes.push("local = ?");
+    params.push(filtro.local);
+  }
+  if (filtro.area) {
+    condicoes.push("area = ?");
+    params.push(filtro.area);
   }
 
-  const stmt = db.prepare(`
-    SELECT categoria, COALESCE(SUM(custo), 0) as total, COUNT(*) as registros
-    FROM entries
-    WHERE ${condicoes.join(" AND ")}
-    GROUP BY categoria
-    ORDER BY total DESC
-  `);
-  const linhas = stmt.all(...params) as unknown as { categoria: Categoria; total: number; registros: number }[];
+  return { condicoes, params };
+}
 
-  const porCategoria = linhas.map((linha) => ({
-    categoria: linha.categoria,
-    total: linha.total,
-    registros: linha.registros,
-  }));
+export function consultarGastos(filtro: FiltroPeriodo): ResultadoGastos {
+  const { condicoes, params } = condicoesFiltro(filtro);
+  condicoes.push("categoria != 'venda'");
+
+  const where = condicoes.join(" AND ");
+
+  const porCategoria = db
+    .prepare(
+      `SELECT area, categoria, COALESCE(SUM(custo), 0) as total, COUNT(*) as registros
+       FROM entries WHERE ${where} GROUP BY area, categoria ORDER BY area, total DESC`,
+    )
+    .all(...params) as unknown as GastoPorCategoria[];
+
+  const porArea = db
+    .prepare(
+      `SELECT area, COALESCE(SUM(custo), 0) as total, COUNT(*) as registros
+       FROM entries WHERE ${where} GROUP BY area ORDER BY total DESC`,
+    )
+    .all(...params) as unknown as GastoPorArea[];
 
   return {
-    totalGasto: porCategoria.reduce((soma, c) => soma + c.total, 0),
-    quantidadeRegistros: porCategoria.reduce((soma, c) => soma + c.registros, 0),
+    totalGasto: porArea.reduce((soma, a) => soma + a.total, 0),
+    quantidadeRegistros: porArea.reduce((soma, a) => soma + a.registros, 0),
+    porArea,
     porCategoria,
   };
 }
@@ -167,8 +234,14 @@ export interface QuantidadePorUnidade {
   quantidade: number;
 }
 
-export interface QuantidadePorTalhao {
-  talhao: string;
+export interface QuantidadePorLocal {
+  local: string;
+  unidade: string;
+  quantidade: number;
+}
+
+export interface ProducaoPorArea {
+  area: Area;
   unidade: string;
   quantidade: number;
 }
@@ -181,19 +254,15 @@ export interface MelhorDiaColheita {
 
 export interface ResultadoProducao {
   totalPorUnidade: QuantidadePorUnidade[];
-  porTalhao: QuantidadePorTalhao[];
+  porArea: ProducaoPorArea[];
+  porLocal: QuantidadePorLocal[];
   diasComColheita: number;
   melhorDia: MelhorDiaColheita | null;
 }
 
 export function consultarProducao(filtro: Omit<FiltroPeriodo, "categoria">): ResultadoProducao {
-  const condicoes = ["data >= ?", "data <= ?", "categoria = 'colheita'", "unidade IS NOT NULL", "quantidade IS NOT NULL"];
-  const params: SQLInputValue[] = [filtro.inicio, filtro.fim];
-
-  if (filtro.talhao) {
-    condicoes.push("talhao = ?");
-    params.push(filtro.talhao);
-  }
+  const { condicoes, params } = condicoesFiltro(filtro);
+  condicoes.push("categoria = 'colheita'", "unidade IS NOT NULL", "quantidade IS NOT NULL");
 
   const where = condicoes.join(" AND ");
 
@@ -203,11 +272,17 @@ export function consultarProducao(filtro: Omit<FiltroPeriodo, "categoria">): Res
     )
     .all(...params) as unknown as QuantidadePorUnidade[];
 
-  const porTalhao = db
+  const porArea = db
     .prepare(
-      `SELECT talhao, unidade, SUM(quantidade) as quantidade FROM entries WHERE ${where} AND talhao IS NOT NULL GROUP BY talhao, unidade ORDER BY quantidade DESC`,
+      `SELECT area, unidade, SUM(quantidade) as quantidade FROM entries WHERE ${where} GROUP BY area, unidade ORDER BY quantidade DESC`,
     )
-    .all(...params) as unknown as QuantidadePorTalhao[];
+    .all(...params) as unknown as ProducaoPorArea[];
+
+  const porLocal = db
+    .prepare(
+      `SELECT local, unidade, SUM(quantidade) as quantidade FROM entries WHERE ${where} AND local IS NOT NULL GROUP BY local, unidade ORDER BY quantidade DESC`,
+    )
+    .all(...params) as unknown as QuantidadePorLocal[];
 
   const diasComColheita = (
     db.prepare(`SELECT COUNT(DISTINCT data) as dias FROM entries WHERE ${where}`).get(...params) as unknown as {
@@ -223,55 +298,56 @@ export function consultarProducao(filtro: Omit<FiltroPeriodo, "categoria">): Res
 
   return {
     totalPorUnidade,
-    porTalhao,
+    porArea,
+    porLocal,
     diasComColheita,
     melhorDia: melhorDia ?? null,
   };
 }
 
+export interface VendaPorArea {
+  area: Area;
+  total: number;
+  registros: number;
+}
+
 export interface ResultadoVendas {
   valorTotal: number;
   quantidadeRegistros: number;
+  porArea: VendaPorArea[];
   porUnidade: QuantidadePorUnidade[];
 }
 
-export function consultarVendas(filtro: Omit<FiltroPeriodo, "categoria" | "talhao">): ResultadoVendas {
-  const params: SQLInputValue[] = [filtro.inicio, filtro.fim];
+export function consultarVendas(filtro: { inicio: string; fim: string; area?: Area }): ResultadoVendas {
+  const { condicoes, params } = condicoesFiltro(filtro);
+  condicoes.push("categoria = 'venda'");
+  const where = condicoes.join(" AND ");
 
   const porUnidade = db
     .prepare(
       `SELECT unidade, SUM(quantidade) as quantidade FROM entries
-       WHERE data >= ? AND data <= ? AND categoria = 'venda' AND unidade IS NOT NULL AND quantidade IS NOT NULL
+       WHERE ${where} AND unidade IS NOT NULL AND quantidade IS NOT NULL
        GROUP BY unidade ORDER BY quantidade DESC`,
     )
     .all(...params) as unknown as QuantidadePorUnidade[];
 
-  const totais = db
+  const porArea = db
     .prepare(
-      `SELECT COALESCE(SUM(custo), 0) as valorTotal, COUNT(*) as registros FROM entries
-       WHERE data >= ? AND data <= ? AND categoria = 'venda'`,
+      `SELECT area, COALESCE(SUM(custo), 0) as total, COUNT(*) as registros FROM entries
+       WHERE ${where} GROUP BY area ORDER BY total DESC`,
     )
-    .get(...params) as unknown as { valorTotal: number; registros: number };
+    .all(...params) as unknown as VendaPorArea[];
 
   return {
-    valorTotal: totais.valorTotal,
-    quantidadeRegistros: totais.registros,
+    valorTotal: porArea.reduce((soma, a) => soma + a.total, 0),
+    quantidadeRegistros: porArea.reduce((soma, a) => soma + a.registros, 0),
+    porArea,
     porUnidade,
   };
 }
 
 export function consultarRegistros(filtro: FiltroPeriodo & { limite?: number }): Entry[] {
-  const condicoes = ["data >= ?", "data <= ?"];
-  const params: SQLInputValue[] = [filtro.inicio, filtro.fim];
-
-  if (filtro.categoria) {
-    condicoes.push("categoria = ?");
-    params.push(filtro.categoria);
-  }
-  if (filtro.talhao) {
-    condicoes.push("talhao = ?");
-    params.push(filtro.talhao);
-  }
+  const { condicoes, params } = condicoesFiltro(filtro);
 
   const limite = filtro.limite && filtro.limite > 0 ? Math.min(filtro.limite, 100) : 20;
   params.push(limite);
