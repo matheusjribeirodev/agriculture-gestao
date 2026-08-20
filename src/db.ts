@@ -361,6 +361,17 @@ export function consultarRegistros(filtro: FiltroPeriodo & { limite?: number }):
   return stmt.all(...params) as unknown as Entry[];
 }
 
+export function listarRegistrosRecentes(limite = 10): Entry[] {
+  const stmt = db.prepare(`SELECT * FROM entries ORDER BY id DESC LIMIT ?`);
+  return stmt.all(limite) as unknown as Entry[];
+}
+
+export function excluirRegistroPorId(id: number): boolean {
+  const stmt = db.prepare(`DELETE FROM entries WHERE id = ?`);
+  const resultado = stmt.run(id);
+  return Number(resultado.changes) > 0;
+}
+
 export interface UsoIA {
   provider: string;
   modelo: string;
