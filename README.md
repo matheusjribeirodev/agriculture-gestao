@@ -107,6 +107,16 @@ para o período pedido, ele diz isso em vez de estimar. Mensagens sem nenhuma da
 intenções (registrar ou consultar) — tipo um simples "oi" — recebem uma resposta
 conversacional direta.
 
+### Preço do café (mercado externo)
+
+Pergunte **"qual o preço do café hoje?"** (ou similar) que o bot busca a cotação do café
+arábica tipo 6/7 bebida dura direto do site [Notícias Agrícolas](https://www.noticiasagricolas.com.br/cotacoes/cafe/cafe-arabica-mercado-fisico-tipo-6-duro)
+(`src/cotacao.ts`, ferramenta `consultar_preco_cafe`) — por município/cooperativa, com a
+data do último fechamento. Mesma regra de sempre: a IA nunca inventa um preço, só usa o
+que veio da página; se algum município estiver "s/ cotação", o bot avisa em vez de
+estimar. O resultado fica em cache por 15 minutos (evita bater na página a cada pergunta
+seguida, já que o preço só fecha uma vez por dia útil).
+
 ## Roteador de IA (Gemini + Claude)
 
 O bot usa dois provedores de IA através de uma interface comum (`src/ai/types.ts`):

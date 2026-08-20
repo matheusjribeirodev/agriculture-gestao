@@ -67,7 +67,7 @@ export class AIRouter {
 
   async interpretar(
     params: ParametrosInterpretacao,
-    executarFerramenta: (nome: string, input: unknown) => unknown,
+    executarFerramenta: (nome: string, input: unknown) => Promise<unknown>,
   ): Promise<ResultadoRouter> {
     const complexidade = classificarComplexidade(params.mensagem);
     const principal = complexidade === "complexa" ? this.providerComplexo : this.providerSimples;
@@ -84,7 +84,7 @@ export class AIRouter {
   private async executarLoop(
     provider: AIProvider,
     params: ParametrosInterpretacao,
-    executarFerramenta: (nome: string, input: unknown) => unknown,
+    executarFerramenta: (nome: string, input: unknown) => Promise<unknown>,
   ): Promise<ResultadoRouter> {
     const rodadasAnteriores: RodadaFerramentas[] = [];
 
@@ -100,7 +100,7 @@ export class AIRouter {
         return { tipo: "registrar", chamada: chamadaRegistrar, provider: provider.nome };
       }
 
-      const resultados = resposta.chamadas.map((c) => executarFerramenta(c.nome, c.input));
+      const resultados = await Promise.all(resposta.chamadas.map((c) => executarFerramenta(c.nome, c.input)));
       rodadasAnteriores.push({ chamadas: resposta.chamadas, resultados, brutoResposta: resposta.brutoResposta });
     }
 

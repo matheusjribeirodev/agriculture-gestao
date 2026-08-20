@@ -14,6 +14,7 @@
     "@google/genai": "^2.17.1",
     "@hapi/boom": "^9.1.4",
     "@whiskeysockets/baileys": "6.7.24",
+    "cheerio": "^1.2.0",
     "dotenv": "^16.4.5",
     "pdfkit": "^0.19.1",
     "pino": "^9.5.0",

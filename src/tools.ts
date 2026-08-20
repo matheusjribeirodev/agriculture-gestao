@@ -7,6 +7,7 @@ import {
   consultarRegistros,
   type Categoria,
 } from "./db";
+import { buscarCotacaoCafe } from "./cotacao";
 import type { FerramentaDef } from "./ai/types";
 
 const CATEGORIAS_SEM_VENDA = CATEGORIAS.filter((c) => c !== "venda") as [Categoria, ...Categoria[]];
@@ -89,6 +90,15 @@ export const FERRAMENTAS: FerramentaDef[] = [
       required: ["inicio", "fim"],
     },
   },
+  {
+    nome: "consultar_preco_cafe",
+    descricao:
+      "Consulta a cotação atual do café arábica (tipo 6/7, bebida dura, bica corrida) no mercado físico, por município/cooperativa, direto da fonte (Notícias Agrícolas). Use quando o produtor perguntar sobre o preço/cotação do café no mercado — isso NÃO é dado da propriedade, é preço de mercado externo.",
+    schema: {
+      type: "object",
+      properties: {},
+    },
+  },
 ];
 
 const FiltroSchema = z.object({
@@ -105,7 +115,7 @@ export interface ResultadoFerramenta {
   erro?: string;
 }
 
-export function executarFerramenta(nome: string, input: unknown): ResultadoFerramenta {
+export async function executarFerramenta(nome: string, input: unknown): Promise<ResultadoFerramenta> {
   try {
     switch (nome) {
       case "consultar_gastos":
@@ -116,6 +126,8 @@ export function executarFerramenta(nome: string, input: unknown): ResultadoFerra
         return { ferramenta: nome, resultado: consultarVendas(FiltroSchema.parse(input)) };
       case "consultar_registros":
         return { ferramenta: nome, resultado: consultarRegistros(FiltroSchema.parse(input)) };
+      case "consultar_preco_cafe":
+        return { ferramenta: nome, resultado: await buscarCotacaoCafe() };
       default:
         return { ferramenta: nome, erro: `Ferramenta desconhecida: ${nome}` };
     }
