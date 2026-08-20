@@ -1,0 +1,40 @@
+{
+  "name": "bot-gestao-rural",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prototipo local de bot de WhatsApp para gestao de propriedade cafeeira",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.117.1",
+    "@google/genai": "^2.17.1",
+    "@hapi/boom": "^9.1.4",
+    "@whiskeysockets/baileys": "6.7.24",
+    "dotenv": "^16.4.5",
+    "pino": "^9.5.0",
+    "qrcode-terminal": "^0.12.0",
+    "zod": "^4.4.3"
+  },
+  "overrides": {
+    "libsignal": "npm:libsignal@^6.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "@types/qrcode-terminal": "^0.12.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  },
+  "allowScripts": {
+    "@whiskeysockets/baileys@6.7.24": true,
+    "esbuild@0.28.2": true,
+    "protobufjs@7.6.5": true,
+    "@google/genai@2.17.1": true
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}
