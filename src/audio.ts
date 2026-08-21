@@ -46,7 +46,7 @@ export async function transcreverAudio(buffer: Buffer, mimeTypeOriginal?: string
   if (uso) {
     const tokensInput = uso.promptTokenCount ?? 0;
     const tokensOutput = (uso.candidatesTokenCount ?? 0) + (uso.thoughtsTokenCount ?? 0);
-    registrarUsoIA({
+    await registrarUsoIA({
       provider: "gemini",
       modelo,
       tokensInput,

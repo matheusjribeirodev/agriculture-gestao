@@ -62,7 +62,7 @@ export class ClaudeProvider implements AIProvider {
       messages: mensagens,
     });
 
-    registrarUsoIA({
+    await registrarUsoIA({
       provider: this.nome,
       modelo: this.modelo,
       tokensInput: resposta.usage.input_tokens,

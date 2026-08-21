@@ -159,13 +159,13 @@ export async function executarFerramenta(nome: string, input: unknown): Promise<
   try {
     switch (nome) {
       case "consultar_gastos":
-        return { ferramenta: nome, resultado: consultarGastos(FiltroSchema.parse(input)) };
+        return { ferramenta: nome, resultado: await consultarGastos(FiltroSchema.parse(input)) };
       case "consultar_producao":
-        return { ferramenta: nome, resultado: consultarProducao(FiltroSchema.parse(input)) };
+        return { ferramenta: nome, resultado: await consultarProducao(FiltroSchema.parse(input)) };
       case "consultar_vendas":
-        return { ferramenta: nome, resultado: consultarVendas(FiltroVendasSchema.parse(input)) };
+        return { ferramenta: nome, resultado: await consultarVendas(FiltroVendasSchema.parse(input)) };
       case "consultar_registros":
-        return { ferramenta: nome, resultado: consultarRegistros(FiltroSchema.parse(input)) };
+        return { ferramenta: nome, resultado: await consultarRegistros(FiltroSchema.parse(input)) };
       case "consultar_preco_cafe":
         return { ferramenta: nome, resultado: await buscarCotacaoCafe() };
       default:

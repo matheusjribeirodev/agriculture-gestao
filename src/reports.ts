@@ -197,15 +197,15 @@ function gerarTexto(ano: number, mes: number, entries: Entry[]): string {
   return linhas.join("\n").trimEnd();
 }
 
-export function gerarRelatorioMesAtual(): string {
+export async function gerarRelatorioMesAtual(): Promise<string> {
   const { inicio, fim, ano, mes } = obterIntervaloMes(0);
-  const entries = buscarEntriesPorPeriodo(inicio, fim);
+  const entries = await buscarEntriesPorPeriodo(inicio, fim);
   return gerarTexto(ano, mes, entries);
 }
 
-export function gerarRelatorioMesPassado(): string {
+export async function gerarRelatorioMesPassado(): Promise<string> {
   const { inicio, fim, ano, mes } = obterIntervaloMes(-1);
-  const entries = buscarEntriesPorPeriodo(inicio, fim);
+  const entries = await buscarEntriesPorPeriodo(inicio, fim);
   return gerarTexto(ano, mes, entries);
 }
 
@@ -213,9 +213,9 @@ function formatarNumero(valor: number): string {
   return valor.toLocaleString("pt-BR");
 }
 
-function gerarTextoUsoIA(offsetMeses: number): string {
+async function gerarTextoUsoIA(offsetMeses: number): Promise<string> {
   const { inicio, fim, ano, mes } = obterIntervaloMes(offsetMeses);
-  const resumos = consultarUsoIA({ inicio, fim });
+  const resumos = await consultarUsoIA({ inicio, fim });
   const nomeMes = NOMES_MES[mes - 1];
 
   if (resumos.length === 0) {
@@ -256,10 +256,10 @@ function gerarTextoUsoIA(offsetMeses: number): string {
   return linhas.join("\n").trimEnd();
 }
 
-export function gerarRelatorioUsoIAMesAtual(): string {
+export function gerarRelatorioUsoIAMesAtual(): Promise<string> {
   return gerarTextoUsoIA(0);
 }
 
-export function gerarRelatorioUsoIAMesPassado(): string {
+export function gerarRelatorioUsoIAMesPassado(): Promise<string> {
   return gerarTextoUsoIA(-1);
 }

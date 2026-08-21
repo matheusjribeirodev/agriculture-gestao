@@ -13,6 +13,7 @@
     "@anthropic-ai/sdk": "^0.117.1",
     "@google/genai": "^2.17.1",
     "@hapi/boom": "^9.1.4",
+    "@supabase/supabase-js": "^2.112.3",
     "@whiskeysockets/baileys": "6.7.24",
     "cheerio": "^1.2.0",
     "dotenv": "^16.4.5",

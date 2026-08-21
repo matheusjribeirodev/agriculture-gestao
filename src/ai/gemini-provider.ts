@@ -65,7 +65,7 @@ export class GeminiProvider implements AIProvider {
     if (uso) {
       const tokensInput = uso.promptTokenCount ?? 0;
       const tokensOutput = (uso.candidatesTokenCount ?? 0) + (uso.thoughtsTokenCount ?? 0);
-      registrarUsoIA({
+      await registrarUsoIA({
         provider: this.nome,
         modelo: this.modelo,
         tokensInput,

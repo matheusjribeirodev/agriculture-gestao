@@ -245,7 +245,7 @@ export interface RelatorioPdf {
 
 async function gerarRelatorioPdfComOffset(offsetMeses: number, area?: Area): Promise<RelatorioPdf> {
   const { inicio, fim, ano, mes } = obterIntervaloMes(offsetMeses);
-  const todasEntries = buscarEntriesPorPeriodo(inicio, fim);
+  const todasEntries = await buscarEntriesPorPeriodo(inicio, fim);
   const entries = area ? todasEntries.filter((e) => e.area === area) : todasEntries;
   const buffer = await gerarPdfRelatorio(ano, mes, entries, area);
   const sufixoArea = area ? `-${area}` : "";

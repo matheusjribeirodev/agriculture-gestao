@@ -4,23 +4,24 @@ Protótipo local de bot de WhatsApp para gestão de custos e atividades de uma p
 rural — cobre tanto a lavoura de café (adubação, colheita, poda, defensivos) quanto o
 resto da propriedade (manutenção, combustível, energia, água), sempre separados por área
 para não misturar os números. O produtor manda uma mensagem em linguagem natural, o bot
-interpreta com IA, pede confirmação e grava num banco SQLite local.
+interpreta com IA, pede confirmação e grava num banco Postgres (Supabase).
 
-**Status:** MVP para validar o conceito. Roda só localmente (`npm run dev`), sem deploy,
-sem hospedagem, sem webhook — conexão direta com o WhatsApp via QR code.
+**Status:** Em produção — rodando 24/7 numa VM Oracle Cloud (Ubuntu, camada gratuita
+"Always Free") via `pm2`, atendendo produtores reais por WhatsApp. Conexão direta com o
+WhatsApp via QR code, sem API oficial/Business, sem webhook.
 
 ## Stack
 
 - Node.js + TypeScript
 - [`@whiskeysockets/baileys`](https://github.com/WhiskeySockets/Baileys) — conexão não-oficial com o WhatsApp (QR code, sem API oficial/Business)
 - **IA híbrida:** [`@google/genai`](https://github.com/googleapis/js-genai) (Gemini, modelo padrão/barato) + [`@anthropic-ai/sdk`](https://github.com/anthropics/anthropic-sdk-typescript) (Claude, só para pedidos complexos) — ver [Roteador de IA](#roteador-de-ia-gemini--claude) abaixo
-- `node:sqlite` (nativo do Node, sem dependência externa) — banco local em arquivo único
+- [`@supabase/supabase-js`](https://github.com/supabase/supabase-js) — banco Postgres hospedado no Supabase (schema/migrations gerenciados lá, acesso via `service_role` key)
 - `dotenv` — variáveis de ambiente
 
-> Trocas em relação ao plano original: `better-sqlite3` → `node:sqlite` (evita compilar
-> binário nativo) e `libsignal` (dependência do Baileys) resolvido via npm em vez de Git
-> — ajustes feitos por causa de restrições do ambiente onde o projeto foi montado, não
-> mudam nada do ponto de vista de uso.
+> Trocas em relação ao plano original: `better-sqlite3` → `node:sqlite` → Supabase/Postgres
+> (a versão local em SQLite rodou bem como MVP, mas a migração pro Supabase abriu caminho
+> pra acessar os mesmos dados de um site, além de tirar o backup manual do arquivo `.db`
+> da equação) e `libsignal` (dependência do Baileys) resolvido via npm em vez de Git.
 
 ## Como rodar
 
@@ -31,17 +32,22 @@ sem hospedagem, sem webhook — conexão direta com o WhatsApp via QR code.
 2. Copie `.env.example` para `.env` e preencha:
    ```
    ANTHROPIC_API_KEY=sua-chave-aqui
-   CLAUDE_MODEL=claude-opus-5
+   CLAUDE_MODEL=claude-sonnet-5
 
    GEMINI_API_KEY=sua-chave-aqui
    GEMINI_MODEL=gemini-3.5-flash-lite
+
+   SUPABASE_URL=https://seu-projeto.supabase.co
+   SUPABASE_SERVICE_ROLE_KEY=sua-service-role-key-aqui
 
    WHATSAPP_NUMEROS_AUTORIZADOS=5535999999999,5535988888888
    ```
    Um ou mais números (separados por vírgula) que podem falar com o bot — só dígitos
    (código do país + DDD + número), sem `+`, sem espaços. Os nomes de modelo mudam com o
    tempo — se algum ficar indisponível, é só trocar aqui, não tem nada disso espalhado
-   pelo código.
+   pelo código. `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` ficam em Project Settings →
+   API no painel do Supabase — a `service_role` key ignora RLS, então nunca deve ser
+   exposta em código client-side, só usada aqui no backend.
 3. Rode:
    ```
    npm run dev
@@ -75,18 +81,21 @@ pra conversa de quem mandou a mensagem, nunca é cruzada entre os dois.
    Custo: R$ 1.500,00
    Local: Talhão 3
 
-   Confirma? Responda "sim" ou "corrigir".
+   Confirma? Responda "sim", "corrigir" ou "não".
    ```
    Para uma venda, a linha correspondente aparece como **Receita** em vez de **Custo** —
    venda é entrada de dinheiro, não gasto.
-3. Se a resposta for **"sim"** (case-insensitive), o registro é gravado no banco e o bot responde "Registrado!".
-4. Qualquer outra resposta descarta o registro pendente e trata a mensagem seguinte como uma nova tentativa de extração.
-5. Comandos especiais, reconhecidos direto por texto (não passam pela IA):
+3. Se a resposta for **"sim"** (case-insensitive, tolera variações tipo "confirmo", "pode confirmar"), o registro é gravado no banco e o bot responde "Registrado!".
+4. Se a resposta for **"não"** (ou variações: "nao", "cancelar", "esquece"), o registro pendente é descartado e o bot avisa que nada foi salvo.
+5. Se a resposta for **"corrigir"** (ou variações: "corrige", "errado"), o registro pendente é descartado e o bot pede a informação correta.
+6. Qualquer outra resposta (não reconhecida como nenhuma das três acima) **não** descarta o registro pendente — o bot pede de novo, mantendo a confirmação em aberto até chegar uma resposta reconhecida.
+7. Comandos especiais, reconhecidos direto por texto (não passam pela IA):
    - **"relatório"** ou **"relatorio"** → resumo do mês atual (texto)
    - **"relatório mês passado"** → resumo do mês anterior (texto)
    - **"relatório em pdf"** / **"relatório pdf mês passado"** → mesma coisa, como um PDF anexado (ver seção "Relatório em PDF") — mas isso é só um atalho de texto; pedir o PDF de qualquer outro jeito ("manda um pdf", "pode gerar um arquivo?") também funciona, via ferramenta de IA
    - **"uso de ia"** → chamadas, tokens e custo estimado do mês atual (ver seção "Uso e custo de IA")
    - **"uso de ia mês passado"** → mesma coisa, mês anterior
+   - **"excluir registro"** / "apagar lançamento" (qualquer conjugação de apagar/excluir/deletar/remover + registro/lançamento/entrada) → lista os 10 registros mais recentes numerados para escolher qual excluir (ver seção "Excluir registro")
 
    O relatório é organizado por área — cada uma com suas próprias despesas, receita
    (vendas) e total colhido, detalhado por categoria — e termina com um resumo geral
@@ -96,7 +105,7 @@ pra conversa de quem mandou a mensagem, nunca é cruzada entre os dois.
 ## Perguntas sobre os dados
 
 Além de registrar, o bot responde perguntas em linguagem natural sobre o que já foi
-registrado — sempre com dados reais do SQLite, nunca inventados. Exemplos:
+registrado — sempre com dados reais do Supabase, nunca inventados. Exemplos:
 
 - "Quanto gastei com adubo esse mês?"
 - "Quanto colhi este mês?"
@@ -185,31 +194,67 @@ ou "pode gerar um pdf só do café?" também funcionam, com ou sem filtro de ár
 nenhum dos dois caminhos há IA envolvida na geração do PDF em si (só, no caso do
 segundo, para entender o pedido) — o desenho e os cálculos são sempre locais.
 
-## Schema do banco (`entries`, SQLite em `data/gestao.db`)
+## Excluir registro
 
-| Campo                | Tipo    | Observação                                                              |
-|-----------------------|---------|--------------------------------------------------------------------------|
-| `id`                  | INTEGER | autoincrement                                                            |
-| `data`                | TEXT    | `YYYY-MM-DD`                                                             |
-| `area`                | TEXT    | `cafe \| propriedade \| outro`                                          |
-| `categoria`           | TEXT    | depende da área — ver `CATEGORIAS_POR_AREA` em `src/db.ts`              |
-| `item`                | TEXT    | nullable                                                                 |
-| `quantidade`          | REAL    | nullable                                                                 |
-| `unidade`             | TEXT    | nullable (ex: "sacos", "kg", "litros")                                  |
-| `custo`               | REAL    | nullable — para categoria `venda`, é o valor recebido (receita)         |
-| `local`               | TEXT    | nullable — local dentro da propriedade (ex: "Talhão 3", "Curral")       |
-| `observacao`          | TEXT    | nullable                                                                 |
-| `mensagem_original`   | TEXT    | texto bruto enviado pelo produtor, para auditoria                       |
-| `criado_em`           | TEXT    | timestamp ISO de quando o registro foi gravado                          |
+Mande **"excluir registro"**, "apagar lançamento" ou qualquer variação (funciona com
+qualquer conjugação de apagar/excluir/deletar/remover, seguida de
+registro/lançamento/entrada) que o bot lista os 10 registros mais recentes numerados,
+mais recente primeiro:
+
+```
+🗑️ Qual registro deseja excluir? Responda com o número ou "cancelar".
+
+1. 20/08/2026 - cafe - colheita - café - 200 sacas - R$ 0,00
+2. 19/08/2026 - propriedade - manutencao - óleo do trator - R$ 300,00
+...
+```
+
+Responda com o número pra excluir aquele registro (apaga direto do banco, sem uma
+segunda confirmação) ou **"cancelar"** pra sair sem apagar nada. Uma resposta que não
+seja nem um número da lista nem "cancelar" reexibe o pedido sem descartar a lista. Esse
+comando não passa por nenhuma IA — é reconhecido por palavra-chave, e a busca/exclusão
+são só um `SELECT`/`DELETE` direto (`listarRegistrosRecentes`/`excluirRegistroPorId` em
+`src/db.ts`). A lista numerada (qual número corresponde a qual registro) fica em memória
+por número autorizado (`src/index.ts`), igual à confirmação de registro — reiniciar o
+bot com uma exclusão pendente descarta essa lista.
+
+## Schema do banco (Postgres/Supabase, projeto "Gestao Finanças")
+
+Tabela `entries`:
+
+| Campo                | Tipo         | Observação                                                              |
+|-----------------------|--------------|--------------------------------------------------------------------------|
+| `id`                  | integer      | identity, autoincrement                                                  |
+| `data`                | date         | volta do cliente Supabase como string `YYYY-MM-DD`                       |
+| `area`                | text         | `cafe \| propriedade \| outro` — CHECK constraint                        |
+| `categoria`           | text         | depende da área — CHECK constraint espelha `CATEGORIAS_POR_AREA` em `src/db.ts` |
+| `item`                | text         | nullable                                                                 |
+| `quantidade`          | numeric      | nullable                                                                 |
+| `unidade`             | text         | nullable (ex: "sacos", "kg", "litros")                                  |
+| `custo`               | numeric      | nullable — para categoria `venda`, é o valor recebido (receita)         |
+| `local`               | text         | nullable — local dentro da propriedade (ex: "Talhão 3", "Curral")       |
+| `observacao`          | text         | nullable                                                                 |
+| `mensagem_original`   | text         | texto bruto enviado pelo produtor, para auditoria                       |
+| `criado_em`           | timestamptz  | default `now()`                                                          |
+
+Tabela `ai_usage`: `id, provider, modelo, tokens_input, tokens_output, custo_estimado
+(nullable), criado_em` — usada pelo comando "uso de ia" (ver seção própria abaixo).
 
 Categorias por área: `cafe` → `adubacao, colheita, poda, defensivo, mao_de_obra, venda,
 outro` · `propriedade` → `manutencao, combustivel, energia, agua, insumo, mao_de_obra,
-venda, outro` · `outro` → `mao_de_obra, venda, outro`.
+venda, outro` · `outro` → `mao_de_obra, venda, outro`. Os dois `CHECK constraints` de
+`area`/`categoria` na tabela replicam exatamente essa regra — uma combinação inválida é
+rejeitada pelo próprio banco, não só pelo código.
 
-> Bancos criados antes deste campo existir tinham só `talhao` (sem `area`) — a migração
-> em `src/db.ts` (`migrarSchemaEntries`) roda automaticamente no boot, renomeia a coluna
-> para `local` e marca todo registro antigo como `area = 'cafe'` (era tudo café até
-> então). Idempotente, não precisa rodar nada manualmente.
+> `numeric` do Postgres volta do PostgREST como string (evita perda de precisão) — o
+> `src/db.ts` converte `quantidade`/`custo`/`custo_estimado` de volta para `number` logo
+> ao ler, então o resto do código (`tools.ts`, `reports.ts`, `pdf.ts`) nunca lida com
+> isso diretamente.
+>
+> O schema e as migrations agora vivem no Supabase (aplicadas via MCP), não mais criadas
+> pelo próprio bot no boot — `src/db.ts` só se conecta e consulta. Migrado de um SQLite
+> local (`data/gestao.db`) em 21/08/2026; o arquivo antigo não é mais usado nem lido pelo
+> bot, mas nada nele foi apagado.
 
 ## Estrutura de pastas
 
@@ -220,7 +265,8 @@ src/
     gemini-provider.ts    # implementação via @google/genai
     claude-provider.ts    # implementação via @anthropic-ai/sdk
     router.ts             # AIRouter: escolhe o provider e faz fallback
-  db.ts        # setup/migração do schema e queries do SQLite (registro + consultas, por área)
+  db.ts        # cliente Supabase e queries (registro, consultas, exclusão, por área) — schema/migrations vivem no Supabase, não aqui
+  cotacao.ts   # busca a cotação do café no mercado externo (scraping, cache de 15 min)
   tools.ts     # ferramentas expostas à IA (tool-use) e o despachante que as executa
   parser.ts    # monta o prompt/ferramentas e delega ao AIRouter (registrar, consultar, gerar PDF ou conversar)
   format.ts    # formatação de data para exibição (YYYY-MM-DD -> dd/mm/aaaa)
@@ -228,9 +274,8 @@ src/
   whatsapp.ts  # conexão Baileys (QR, filtro de remetente, áudio, envio/recebimento)
   reports.ts   # geração dos relatórios mensais (texto), agrupados por área
   pdf.ts       # geração do relatório mensal em PDF (pdfkit), agrupado por área
-  index.ts     # orquestração (fluxo de confirmação, comandos especiais)
+  index.ts     # orquestração (fluxo de confirmação, exclusão, comandos especiais)
 auth_info/     # sessão do WhatsApp (gerada automaticamente, git-ignored)
-data/          # banco SQLite (gerado automaticamente, git-ignored)
 ```
 
 ## Áudio
@@ -256,11 +301,14 @@ recusados com um aviso.
 - Vários números autorizados, mas sem conceito de propriedades separadas por usuário —
   todo mundo em `WHATSAPP_NUMEROS_AUTORIZADOS` vê e registra na mesma base (a separação
   por `area`/`local` organiza os relatórios, mas não isola produtores diferentes).
-- Confirmação pendente e memória de acompanhamento de perguntas ficam em memória
-  (`Map`); reiniciar o bot descarta qualquer confirmação ou pergunta em aberto.
+- Confirmação pendente, exclusão pendente e memória de acompanhamento de perguntas
+  ficam em memória (`Map`); reiniciar o bot descarta qualquer confirmação, exclusão ou
+  pergunta em aberto.
 - Sem controle de estoque — não há como responder "quantas sacas ainda tenho".
-- Sem correção/exclusão de registros já salvos, sem exportação em Excel, sem memória
-  persistente da propriedade (talhões, hectares) — fases seguintes.
+- Tem exclusão de registros (lista numerada, ver seção "Excluir registro"), mas ainda
+  sem edição direta de um registro já salvo — a única forma de corrigir um erro é
+  excluir e registrar de novo. Sem exportação em Excel, sem memória persistente da
+  propriedade (talhões, hectares) — fases seguintes.
 - Tem métricas de uso/custo (comando "uso de ia"), mas ainda sem limite de orçamento
   mensal configurável nem qualquer ação automática (ex: priorizar Gemini) perto de um
   limite — é só visibilidade por enquanto.

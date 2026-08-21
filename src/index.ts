@@ -162,9 +162,9 @@ async function processarMensagem(
   const responder = (resposta: string) => enviarMensagem(remetente, resposta);
 
   if (normalizado.includes("uso de ia") || normalizado.includes("uso da ia") || normalizado.includes("consumo de ia")) {
-    const relatorio = normalizado.includes("passado")
+    const relatorio = await (normalizado.includes("passado")
       ? gerarRelatorioUsoIAMesPassado()
-      : gerarRelatorioUsoIAMesAtual();
+      : gerarRelatorioUsoIAMesAtual());
     await responder(relatorio);
     return;
   }
@@ -182,7 +182,7 @@ async function processarMensagem(
       return;
     }
 
-    const relatorio = querMesPassado ? gerarRelatorioMesPassado() : gerarRelatorioMesAtual();
+    const relatorio = await (querMesPassado ? gerarRelatorioMesPassado() : gerarRelatorioMesAtual());
     await responder(relatorio);
     return;
   }
@@ -201,7 +201,7 @@ async function processarMensagem(
 
     if (escolhido) {
       exclusoesPendentes.delete(remetente);
-      excluirRegistroPorId(escolhido.id);
+      await excluirRegistroPorId(escolhido.id);
       await responder(`Excluído: ${formatarLinhaRegistro(escolhido)}`);
       return;
     }
@@ -211,7 +211,7 @@ async function processarMensagem(
   }
 
   if (ehPedidoExclusao(normalizado)) {
-    const recentes = listarRegistrosRecentes(10);
+    const recentes = await listarRegistrosRecentes(10);
     if (recentes.length === 0) {
       await responder("Não há registros para excluir.");
       return;
@@ -232,7 +232,7 @@ async function processarMensagem(
         ...pendente.extraida,
         mensagem_original: pendente.mensagemOriginal,
       };
-      inserirEntry(entrada);
+      await inserirEntry(entrada);
       await responder("Registrado!");
       return;
     }
@@ -283,7 +283,7 @@ async function processarMensagem(
 }
 
 async function main(): Promise<void> {
-  initDb();
+  await initDb();
 
   const { enviarMensagem, enviarDocumento } = await conectarWhatsApp(numerosAutorizados, async (texto, remetente) => {
     try {
