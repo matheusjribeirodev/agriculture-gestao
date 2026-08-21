@@ -1,49 +1,46 @@
 import "dotenv/config";
-import {
-  initDb,
-  inserirEntry,
-  listarRegistrosRecentes,
-  excluirRegistroPorId,
-  type EntradaParaSalvar,
-  type Entry,
-} from "./db";
-import { interpretarMensagem, type EntradaExtraida, type TrocaAnterior } from "./parser";
+import { initDb } from "./db";
+import { interpretarMensagem, type TrocaAnterior } from "./parser";
 import { conectarWhatsApp } from "./whatsapp";
-import {
-  gerarRelatorioMesAtual,
-  gerarRelatorioMesPassado,
-  gerarRelatorioUsoIAMesAtual,
-  gerarRelatorioUsoIAMesPassado,
-  formatarMoeda,
-} from "./reports";
-import { formatarDataBR } from "./format";
-import { gerarPdfRelatorioMesAtual, gerarPdfRelatorioMesPassado } from "./pdf";
+import { gerarRelatorioUsoIAMesAtual, gerarRelatorioUsoIAMesPassado } from "./reports";
+import { PROJETOS } from "./projects/registry";
+import { ehProjetoValido, type Projeto, type ProjetoDef, type RegistroSalvo } from "./projects/types";
 
-// Aceita uma lista separada por vírgula (WHATSAPP_NUMEROS_AUTORIZADOS) ou,
-// por compatibilidade, a variável antiga de um único número.
-function lerNumerosAutorizados(): string[] {
-  const lista = process.env.WHATSAPP_NUMEROS_AUTORIZADOS;
-  if (lista) {
-    return lista
+// Mapa número → projeto(s) que ele pode usar, formato:
+// "numero:projeto1,projeto2|numero2:projeto3" — substitui a antiga lista
+// simples WHATSAPP_NUMEROS_AUTORIZADOS. Número fora daqui continua barrado.
+function lerPermissoesProjeto(): Map<string, Projeto[]> {
+  const bruto = process.env.PERMISSOES_PROJETO;
+  const permissoes = new Map<string, Projeto[]>();
+  if (!bruto) return permissoes;
+
+  for (const par of bruto.split("|")) {
+    const [numero, listaProjetos] = par.split(":");
+    if (!numero || !listaProjetos) continue;
+    const projetos = listaProjetos
       .split(",")
-      .map((n) => n.trim())
-      .filter((n) => n.length > 0);
+      .map((p) => p.trim())
+      .filter(ehProjetoValido);
+    if (projetos.length > 0) {
+      permissoes.set(numero.trim(), projetos);
+    }
   }
-  const unico = process.env.WHATSAPP_NUMBER_AUTORIZADO;
-  return unico ? [unico] : [];
+  return permissoes;
 }
 
-const numerosAutorizados = lerNumerosAutorizados();
+const permissoesProjeto = lerPermissoesProjeto();
+const numerosAutorizados = [...permissoesProjeto.keys()];
 if (numerosAutorizados.length === 0) {
-  throw new Error("Defina WHATSAPP_NUMEROS_AUTORIZADOS (ou WHATSAPP_NUMBER_AUTORIZADO) no arquivo .env");
+  throw new Error("Defina PERMISSOES_PROJETO no arquivo .env (ex: 5535999999999:gestao_rural)");
 }
 
 interface ConfirmacaoPendente {
-  extraida: EntradaExtraida;
+  projeto: ProjetoDef;
+  dados: Record<string, unknown>;
   mensagemOriginal: string;
 }
 
-// Uma entrada por número autorizado — cada produtor tem sua própria
+// Uma entrada por número autorizado — cada pessoa tem sua própria
 // confirmação pendente e memória de acompanhamento, sem interferir uma na
 // outra.
 const pendentes = new Map<string, ConfirmacaoPendente>();
@@ -54,13 +51,20 @@ const pendentes = new Map<string, ConfirmacaoPendente>();
 const contextoPendente = new Map<string, TrocaAnterior>();
 
 interface ExclusaoPendente {
-  itens: Map<number, Entry>;
+  projeto: ProjetoDef;
+  itens: Map<number, RegistroSalvo>;
 }
 
 // Lista numerada de registros recentes aguardando escolha de qual excluir —
 // também por número autorizado, e também perdida em restart (mesma lógica
 // de `pendentes`).
 const exclusoesPendentes = new Map<string, ExclusaoPendente>();
+
+// Projeto ativo por número (só relevante pra quem tem mais de um liberado
+// em PERMISSOES_PROJETO) — em memória, perdido no restart (mesma limitação
+// já documentada de `pendentes`/`exclusoesPendentes`), volta pro padrão
+// `gestao_rural`.
+const projetoAtivo = new Map<string, Projeto>();
 
 const REGEX_DIACRITICOS = /[̀-ͯ]/g;
 const REGEX_PONTUACAO_BORDA = /^[.,!?;:\s]+|[.,!?;:\s]+$/g;
@@ -110,45 +114,22 @@ function ehPedidoExclusao(normalizado: string): boolean {
   return REGEX_VERBO_EXCLUSAO.test(normalizado) && REGEX_ALVO_EXCLUSAO.test(normalizado);
 }
 
-function formatarLinhaRegistro(entry: Entry): string {
-  const partes = [formatarDataBR(entry.data), entry.area, entry.categoria];
-  if (entry.item) partes.push(entry.item);
-  if (entry.quantidade !== null) {
-    partes.push(`${entry.quantidade}${entry.unidade ? " " + entry.unidade : ""}`);
-  }
-  if (entry.custo !== null) partes.push(formatarMoeda(entry.custo));
-  return partes.join(" - ");
+// Comando de troca exige a mensagem inteira ser (só) o nome do projeto —
+// de propósito não é um `.includes()`: "propriedade" aparece com frequência
+// dentro de frases normais de registro/consulta ("gastei com a
+// propriedade"), então um match solto hijackaria essas mensagens.
+function ehComandoTroca(normalizado: string): Projeto | null {
+  const semPrefixo = normalizado.replace(/^projeto\s+/, "");
+  if (semPrefixo === "financas" || semPrefixo === "financeiro") return "financas_pessoais";
+  if (semPrefixo === "propriedade" || semPrefixo === "rural") return "gestao_rural";
+  return null;
 }
 
-function formatarListaExclusao(entries: Entry[]): string {
+function formatarListaExclusao(projeto: ProjetoDef, itens: RegistroSalvo[]): string {
   const linhas = ['🗑️ Qual registro deseja excluir? Responda com o número ou "cancelar".', ""];
-  entries.forEach((entry, i) => {
-    linhas.push(`${i + 1}. ${formatarLinhaRegistro(entry)}`);
+  itens.forEach((item, i) => {
+    linhas.push(`${i + 1}. ${projeto.formatarLinhaRegistro(item)}`);
   });
-  return linhas.join("\n");
-}
-
-function formatarResumo(entrada: EntradaExtraida): string {
-  const linhas = [
-    "Entendi o seguinte:",
-    "",
-    `Data: ${formatarDataBR(entrada.data)}`,
-    `Área: ${entrada.area}`,
-    `Categoria: ${entrada.categoria}`,
-  ];
-
-  if (entrada.item) linhas.push(`Item: ${entrada.item}`);
-  if (entrada.quantidade !== null) {
-    linhas.push(`Quantidade: ${entrada.quantidade}${entrada.unidade ? " " + entrada.unidade : ""}`);
-  }
-  if (entrada.custo !== null) {
-    const rotulo = entrada.categoria === "venda" ? "Receita" : "Custo";
-    linhas.push(`${rotulo}: ${formatarMoeda(entrada.custo)}`);
-  }
-  if (entrada.local) linhas.push(`Local: ${entrada.local}`);
-  if (entrada.observacao) linhas.push(`Observação: ${entrada.observacao}`);
-
-  linhas.push("", 'Confirma? Responda "sim", "corrigir" ou "não".');
   return linhas.join("\n");
 }
 
@@ -160,6 +141,25 @@ async function processarMensagem(
 ): Promise<void> {
   const normalizado = normalizarTexto(texto);
   const responder = (resposta: string) => enviarMensagem(remetente, resposta);
+  const projetosPermitidos = permissoesProjeto.get(remetente) ?? [];
+
+  const projetoAlvo = ehComandoTroca(normalizado);
+  if (projetoAlvo) {
+    if (!projetosPermitidos.includes(projetoAlvo)) {
+      await responder("Você não tem acesso a esse projeto.");
+      return;
+    }
+    projetoAtivo.set(remetente, projetoAlvo);
+    // Evita uma confirmação/exclusão/pergunta em aberto de um projeto vazar
+    // pro outro depois da troca.
+    pendentes.delete(remetente);
+    exclusoesPendentes.delete(remetente);
+    contextoPendente.delete(remetente);
+    await responder(`Modo: ${PROJETOS[projetoAlvo].nomeExibicao} ✅`);
+    return;
+  }
+
+  const projeto = PROJETOS[projetoAtivo.get(remetente) ?? "gestao_rural"];
 
   if (normalizado.includes("uso de ia") || normalizado.includes("uso da ia") || normalizado.includes("consumo de ia")) {
     const relatorio = await (normalizado.includes("passado")
@@ -171,18 +171,16 @@ async function processarMensagem(
 
   if (normalizado.includes("relatorio")) {
     const querPdf = normalizado.includes("pdf");
-    const querMesPassado = normalizado.includes("passado");
+    const offsetMeses = normalizado.includes("passado") ? -1 : 0;
 
     if (querPdf) {
       await responder("📄 Gerando o PDF, só um instante...");
-      const { buffer, nomeArquivo } = querMesPassado
-        ? await gerarPdfRelatorioMesPassado()
-        : await gerarPdfRelatorioMesAtual();
+      const { buffer, nomeArquivo } = await projeto.gerarRelatorioPdf(offsetMeses);
       await enviarDocumento(remetente, buffer, nomeArquivo, "application/pdf");
       return;
     }
 
-    const relatorio = await (querMesPassado ? gerarRelatorioMesPassado() : gerarRelatorioMesAtual());
+    const relatorio = await projeto.gerarRelatorioTexto(offsetMeses);
     await responder(relatorio);
     return;
   }
@@ -201,8 +199,8 @@ async function processarMensagem(
 
     if (escolhido) {
       exclusoesPendentes.delete(remetente);
-      await excluirRegistroPorId(escolhido.id);
-      await responder(`Excluído: ${formatarLinhaRegistro(escolhido)}`);
+      await exclusaoPendente.projeto.excluirPorId(escolhido.id);
+      await responder(`Excluído: ${exclusaoPendente.projeto.formatarLinhaRegistro(escolhido)}`);
       return;
     }
 
@@ -211,15 +209,15 @@ async function processarMensagem(
   }
 
   if (ehPedidoExclusao(normalizado)) {
-    const recentes = await listarRegistrosRecentes(10);
+    const recentes = await projeto.listarRecentes(10);
     if (recentes.length === 0) {
       await responder("Não há registros para excluir.");
       return;
     }
-    const itens = new Map<number, Entry>();
-    recentes.forEach((entry, i) => itens.set(i + 1, entry));
-    exclusoesPendentes.set(remetente, { itens });
-    await responder(formatarListaExclusao(recentes));
+    const itens = new Map<number, RegistroSalvo>();
+    recentes.forEach((item, i) => itens.set(i + 1, item));
+    exclusoesPendentes.set(remetente, { projeto, itens });
+    await responder(formatarListaExclusao(projeto, recentes));
     return;
   }
 
@@ -228,11 +226,8 @@ async function processarMensagem(
   if (pendente) {
     if (ehConfirmacaoPositiva(normalizado)) {
       pendentes.delete(remetente);
-      const entrada: EntradaParaSalvar = {
-        ...pendente.extraida,
-        mensagem_original: pendente.mensagemOriginal,
-      };
-      await inserirEntry(entrada);
+      const dados = { ...pendente.dados, mensagem_original: pendente.mensagemOriginal };
+      await pendente.projeto.inserir(dados);
       await responder("Registrado!");
       return;
     }
@@ -258,20 +253,17 @@ async function processarMensagem(
   const trocaAnterior = contextoPendente.get(remetente);
   contextoPendente.delete(remetente);
 
-  const resultado = await interpretarMensagem(texto, trocaAnterior);
+  const resultado = await interpretarMensagem(texto, projeto, trocaAnterior);
 
   if (resultado.tipo === "registrar") {
-    pendentes.set(remetente, { extraida: resultado.dados, mensagemOriginal: texto });
-    await responder(formatarResumo(resultado.dados));
+    pendentes.set(remetente, { projeto, dados: resultado.dados, mensagemOriginal: texto });
+    await responder(projeto.formatarResumoConfirmacao(resultado.dados));
     return;
   }
 
   if (resultado.tipo === "gerar_pdf") {
     await responder("📄 Gerando o PDF, só um instante...");
-    const { buffer, nomeArquivo } =
-      resultado.periodo === "mes_passado"
-        ? await gerarPdfRelatorioMesPassado(resultado.area)
-        : await gerarPdfRelatorioMesAtual(resultado.area);
+    const { buffer, nomeArquivo } = await projeto.gerarRelatorioPdf(resultado.offsetMeses, resultado.extra);
     await enviarDocumento(remetente, buffer, nomeArquivo, "application/pdf");
     return;
   }

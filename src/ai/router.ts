@@ -51,6 +51,11 @@ export interface ParametrosInterpretacao {
   historico: TurnoConversa[];
   mensagem: string;
   ferramentas: FerramentaDef[];
+  // Nome da ferramenta que sinaliza "registrar" ou "gerar PDF" — varia por
+  // projeto (ex: "registrar_entrada" na gestão rural, "registrar_lancamento"
+  // em finanças pessoais), então o router não pode assumir um nome fixo.
+  nomeFerramentaRegistrar: string;
+  nomeFerramentaPdf: string;
 }
 
 export type ResultadoRouter =
@@ -96,12 +101,12 @@ export class AIRouter {
         return { tipo: "texto", texto: resposta.texto, provider: provider.nome, teveFerramentas: rodadasAnteriores.length > 0 };
       }
 
-      const chamadaRegistrar = resposta.chamadas.find((c) => c.nome === "registrar_entrada");
+      const chamadaRegistrar = resposta.chamadas.find((c) => c.nome === params.nomeFerramentaRegistrar);
       if (chamadaRegistrar) {
         return { tipo: "registrar", chamada: chamadaRegistrar, provider: provider.nome };
       }
 
-      const chamadaPdf = resposta.chamadas.find((c) => c.nome === "gerar_relatorio_pdf");
+      const chamadaPdf = resposta.chamadas.find((c) => c.nome === params.nomeFerramentaPdf);
       if (chamadaPdf) {
         return { tipo: "gerar_pdf", chamada: chamadaPdf, provider: provider.nome };
       }

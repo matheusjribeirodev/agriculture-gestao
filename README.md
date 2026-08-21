@@ -1,10 +1,12 @@
-# Bot de Gestão Rural (WhatsApp)
+# Bot de Gestão Rural + Finanças Pessoais (WhatsApp)
 
-Protótipo local de bot de WhatsApp para gestão de custos e atividades de uma propriedade
-rural — cobre tanto a lavoura de café (adubação, colheita, poda, defensivos) quanto o
-resto da propriedade (manutenção, combustível, energia, água), sempre separados por área
-para não misturar os números. O produtor manda uma mensagem em linguagem natural, o bot
-interpreta com IA, pede confirmação e grava num banco Postgres (Supabase).
+Bot de WhatsApp multi-projeto: hoje cobre **gestão rural** (custos/receitas/produção de
+uma propriedade — lavoura de café e o resto da propriedade, sempre separados por área) e
+**finanças pessoais** (despesas/receitas do dia a dia, por categoria e forma de
+pagamento). Cada número autorizado só enxerga os projetos liberados pra ele, sem misturar
+dados entre projetos. Quem manda a mensagem em linguagem natural, o bot interpreta com
+IA, pede confirmação e grava num banco Postgres (Supabase) — cada projeto na sua própria
+tabela.
 
 **Status:** Em produção — rodando 24/7 numa VM Oracle Cloud (Ubuntu, camada gratuita
 "Always Free") via `pm2`, atendendo produtores reais por WhatsApp. Conexão direta com o
@@ -40,14 +42,16 @@ WhatsApp via QR code, sem API oficial/Business, sem webhook.
    SUPABASE_URL=https://seu-projeto.supabase.co
    SUPABASE_SERVICE_ROLE_KEY=sua-service-role-key-aqui
 
-   WHATSAPP_NUMEROS_AUTORIZADOS=5535999999999,5535988888888
+   PERMISSOES_PROJETO=5535999999999:gestao_rural|5535988888888:gestao_rural,financas_pessoais
    ```
-   Um ou mais números (separados por vírgula) que podem falar com o bot — só dígitos
-   (código do país + DDD + número), sem `+`, sem espaços. Os nomes de modelo mudam com o
-   tempo — se algum ficar indisponível, é só trocar aqui, não tem nada disso espalhado
-   pelo código. `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` ficam em Project Settings →
-   API no painel do Supabase — a `service_role` key ignora RLS, então nunca deve ser
-   exposta em código client-side, só usada aqui no backend.
+   `PERMISSOES_PROJETO` mapeia número → projeto(s) liberado(s) — números separados por
+   `|`, projetos de um mesmo número separados por `,` (só dígitos no número: código do
+   país + DDD + número, sem `+`, sem espaços; projetos válidos: `gestao_rural`,
+   `financas_pessoais`). Número fora daqui é barrado, igual antes. Os nomes de modelo
+   mudam com o tempo — se algum ficar indisponível, é só trocar aqui, não tem nada disso
+   espalhado pelo código. `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` ficam em Project
+   Settings → API no painel do Supabase — a `service_role` key ignora RLS, então nunca
+   deve ser exposta em código client-side, só usada aqui no backend.
 3. Rode:
    ```
    npm run dev
@@ -60,10 +64,34 @@ WhatsApp via QR code, sem API oficial/Business, sem webhook.
 
 O ideal é ter um número **dedicado** pro bot (o que é escaneado no QR), separado dos
 números que vão efetivamente mandar mensagem — coloque um ou mais desses últimos em
-`WHATSAPP_NUMEROS_AUTORIZADOS`. Cada número autorizado tem sua própria confirmação
-pendente e memória de acompanhamento (`src/index.ts`), então duas pessoas podem usar o
-bot ao mesmo tempo sem uma interferir na conversa da outra — a resposta sempre volta
-pra conversa de quem mandou a mensagem, nunca é cruzada entre os dois.
+`PERMISSOES_PROJETO`. Cada número autorizado tem sua própria confirmação pendente e
+memória de acompanhamento (`src/index.ts`), então várias pessoas podem usar o bot ao
+mesmo tempo sem uma interferir na conversa da outra — a resposta sempre volta pra
+conversa de quem mandou a mensagem, nunca é cruzada entre elas.
+
+## Projetos e troca de contexto
+
+O bot atende dois projetos, cada um com seu próprio schema, categorias, ferramentas de
+IA e relatório — `src/projects/gestao-rural/` e `src/projects/financas-pessoais/` (ver
+"Estrutura de pastas" abaixo). O que é genérico (autorização, roteador de IA,
+confirmação sim/corrigir/não, exclusão numerada, "uso de ia", WhatsApp/áudio) é
+compartilhado; o que muda por projeto fica isolado dentro do módulo dele, sem vazar dado
+de um pro outro.
+
+- Número liberado pra **um projeto só** (via `PERMISSOES_PROJETO`) sempre fala direto com
+  ele, sem comando de troca disponível.
+- Número liberado pros **dois** tem um "projeto ativo" (padrão: `gestao_rural`), trocado
+  por dois comandos reconhecidos por palavra-chave — não passam pela IA, e exigem a
+  mensagem ser só o comando (evita que uma frase comum tipo "gastei com a propriedade"
+  seja confundida com o comando de troca):
+  - **"financas"** ou **"projeto financas"** → muda para `financas_pessoais`
+  - **"propriedade"** ou **"projeto propriedade"** → volta para `gestao_rural`
+
+  Trocar de projeto limpa qualquer confirmação, exclusão pendente ou pergunta em aberto
+  desse número — evita misturar o fluxo de um projeto com o outro. Pedir um projeto sem
+  permissão responde "Você não tem acesso a esse projeto." em vez de trocar. O projeto
+  ativo fica em memória (mesma lógica de `pendentes`/`exclusoesPendentes`) — reiniciar o
+  bot volta todo mundo pro padrão `gestao_rural`.
 
 ## Fluxo
 
@@ -116,10 +144,11 @@ registrado — sempre com dados reais do Supabase, nunca inventados. Exemplos:
 
 Como funciona: a IA (Gemini ou Claude, ver seção abaixo) decide qual consulta chamar
 (`consultar_gastos`, `consultar_producao`, `consultar_vendas` ou `consultar_registros`,
-definidas em `src/tools.ts`) e com quais parâmetros (incluindo o período, resolvido a
-partir de expressões como "mês passado" ou "este ano", e opcionalmente a área e o
-local), mas quem executa a query no banco é sempre o código em `src/db.ts` — a IA nunca
-roda SQL diretamente. Quando o produtor não pede uma área específica, as consultas
+definidas em `src/projects/gestao-rural/tools.ts`) e com quais parâmetros (incluindo o
+período, resolvido a partir de expressões como "mês passado" ou "este ano", e
+opcionalmente a área e o local), mas quem executa a query no banco é sempre o código em
+`src/projects/gestao-rural/db.ts` — a IA nunca roda SQL diretamente. Quando o produtor
+não pede uma área específica, as consultas
 retornam o total geral **e** o detalhamento por área junto — nunca um número só
 misturando café com o resto da propriedade sem dizer a origem. Se faltar uma informação
 (ex: o período), o bot pergunta antes de responder, e se não houver dados para o
@@ -127,11 +156,17 @@ período pedido, ele diz isso em vez de estimar. Mensagens sem nenhuma das inten
 acima (registrar, consultar, pedir PDF) — tipo um simples "oi" — recebem uma resposta
 conversacional direta.
 
+Em **finanças pessoais** (`src/projects/financas-pessoais/`) o mesmo padrão vale para
+`consultar_gastos`, `consultar_receitas`, `consultar_por_forma_pagamento` e
+`consultar_registros` — exemplos: "quanto gastei com mercado esse mês?", "quanto recebi
+de salário esse ano?", "quanto paguei no cartão de crédito esse mês?".
+
 ### Preço do café (mercado externo)
 
 Pergunte **"qual o preço do café hoje?"** (ou similar) que o bot busca a cotação do café
 arábica tipo 6/7 bebida dura direto do site [Notícias Agrícolas](https://www.noticiasagricolas.com.br/cotacoes/cafe/cafe-arabica-mercado-fisico-tipo-6-duro)
-(`src/cotacao.ts`, ferramenta `consultar_preco_cafe`) — por município/cooperativa, com a
+(`src/projects/gestao-rural/cotacao.ts`, ferramenta `consultar_preco_cafe`, só no
+projeto `gestao_rural`) — por município/cooperativa, com a
 data do último fechamento. Mesma regra de sempre: a IA nunca inventa um preço, só usa o
 que veio da página; se algum município estiver "s/ cotação", o bot avisa em vez de
 estimar. O resultado fica em cache por 15 minutos (evita bater na página a cada pergunta
@@ -158,9 +193,10 @@ sequência — a Claude olha um resumo, decide que precisa de mais detalhe, cons
 novo, e só então responde. O router suporta até 4 rodadas de ferramentas nessa mesma
 mensagem antes de forçar uma resposta.
 
-Ambos os provedores usam exatamente as mesmas ferramentas (`src/tools.ts`) e a mesma
-regra de nunca inventar dados — a escolha de qual IA responde não muda o que o bot pode
-fazer, só o custo/qualidade de cada resposta.
+Ambos os provedores usam exatamente as mesmas ferramentas — as do **projeto ativo** de
+quem mandou a mensagem (ver "Projetos e troca de contexto" acima) — e a mesma regra de
+nunca inventar dados. A escolha de qual IA responde não muda o que o bot pode fazer, só
+o custo/qualidade de cada resposta.
 
 ### Uso e custo de IA
 
@@ -180,19 +216,21 @@ mas avisa que o custo daquele provider não pôde ser estimado, em vez de chutar
 ### Relatório em PDF
 
 Mande **"relatório em pdf"** (ou "relatório pdf mês passado") que o bot gera um PDF
-(`src/pdf.ts`, biblioteca `pdfkit` — sem depender de navegador/Chromium, leve o
-suficiente pra rodar numa VM de 1GB) com cabeçalho, cartões de resumo (despesa total,
-receita total, saldo, total colhido), uma seção por área com sua própria tabela
-(categoria, registros, quantidade, custo/receita) e rodapé com data de geração e
-numeração de página. Usa os mesmos dados/cálculos do relatório em texto
-(`src/reports.ts`).
+(biblioteca `pdfkit` — sem depender de navegador/Chromium, leve o suficiente pra rodar
+numa VM de 1GB) com cabeçalho, cartões de resumo e uma tabela por categoria, rodapé com
+data de geração e numeração de página. Os primitivos de desenho (cabeçalho, cartão,
+rodapé, paginação — inclusive a lógica de quebra de página, que já teve um bug corrigido)
+ficam em `src/pdf-shared.ts`, compartilhados pelos dois projetos; cada um desenha seu
+próprio conteúdo (`src/projects/gestao-rural/pdf.ts` — despesa/receita/saldo/colhido por
+área — e `src/projects/financas-pessoais/pdf.ts` — despesa/receita/saldo por categoria e
+por forma de pagamento).
 
 Esse comando exato é só um atalho rápido (evita gastar tokens de IA no caso óbvio) — na
 prática, qualquer pedido de PDF/arquivo/documento passa pela ferramenta de IA
-`gerar_relatorio_pdf` (`src/tools.ts`), então frases como "manda esse relatório em pdf"
-ou "pode gerar um pdf só do café?" também funcionam, com ou sem filtro de área. Em
-nenhum dos dois caminhos há IA envolvida na geração do PDF em si (só, no caso do
-segundo, para entender o pedido) — o desenho e os cálculos são sempre locais.
+`gerar_relatorio_pdf` de cada projeto, então frases como "manda esse relatório em pdf"
+ou "pode gerar um pdf só do café?" também funcionam (o filtro por área só existe na
+gestão rural). Em nenhum dos dois caminhos há IA envolvida na geração do PDF em si (só,
+no caso do segundo, para entender o pedido) — o desenho e os cálculos são sempre locais.
 
 ## Excluir registro
 
@@ -213,14 +251,18 @@ Responda com o número pra excluir aquele registro (apaga direto do banco, sem u
 segunda confirmação) ou **"cancelar"** pra sair sem apagar nada. Uma resposta que não
 seja nem um número da lista nem "cancelar" reexibe o pedido sem descartar a lista. Esse
 comando não passa por nenhuma IA — é reconhecido por palavra-chave, e a busca/exclusão
-são só um `SELECT`/`DELETE` direto (`listarRegistrosRecentes`/`excluirRegistroPorId` em
-`src/db.ts`). A lista numerada (qual número corresponde a qual registro) fica em memória
-por número autorizado (`src/index.ts`), igual à confirmação de registro — reiniciar o
-bot com uma exclusão pendente descarta essa lista.
+são só um `SELECT`/`DELETE` direto, no projeto ativo de quem mandou a mensagem
+(`listarRecentes`/`excluirPorId` de cada módulo em `src/projects/`). A lista numerada
+(qual número corresponde a qual registro) fica em memória por número autorizado
+(`src/index.ts`), igual à confirmação de registro — reiniciar o bot com uma exclusão
+pendente descarta essa lista.
 
 ## Schema do banco (Postgres/Supabase, projeto "Gestao Finanças")
 
-Tabela `entries`:
+Cada projeto tem sua própria tabela, sem relação entre elas — é o que garante que dado
+de um não vaza pro relatório/consulta do outro.
+
+Tabela `entries` (`gestao_rural`):
 
 | Campo                | Tipo         | Observação                                                              |
 |-----------------------|--------------|--------------------------------------------------------------------------|
@@ -237,44 +279,85 @@ Tabela `entries`:
 | `mensagem_original`   | text         | texto bruto enviado pelo produtor, para auditoria                       |
 | `criado_em`           | timestamptz  | default `now()`                                                          |
 
-Tabela `ai_usage`: `id, provider, modelo, tokens_input, tokens_output, custo_estimado
-(nullable), criado_em` — usada pelo comando "uso de ia" (ver seção própria abaixo).
-
 Categorias por área: `cafe` → `adubacao, colheita, poda, defensivo, mao_de_obra, venda,
 outro` · `propriedade` → `manutencao, combustivel, energia, agua, insumo, mao_de_obra,
-venda, outro` · `outro` → `mao_de_obra, venda, outro`. Os dois `CHECK constraints` de
-`area`/`categoria` na tabela replicam exatamente essa regra — uma combinação inválida é
-rejeitada pelo próprio banco, não só pelo código.
+venda, outro` · `outro` → `mao_de_obra, venda, outro`.
 
-> `numeric` do Postgres volta do PostgREST como string (evita perda de precisão) — o
-> `src/db.ts` converte `quantidade`/`custo`/`custo_estimado` de volta para `number` logo
-> ao ler, então o resto do código (`tools.ts`, `reports.ts`, `pdf.ts`) nunca lida com
-> isso diretamente.
+Tabela `lancamentos_pessoais` (`financas_pessoais`):
+
+| Campo                | Tipo         | Observação                                                              |
+|-----------------------|--------------|--------------------------------------------------------------------------|
+| `id`                  | integer      | identity, autoincrement                                                  |
+| `data`                | date         | volta do cliente Supabase como string `YYYY-MM-DD`                       |
+| `tipo`                | text         | `despesa \| receita` — CHECK constraint                                  |
+| `categoria`           | text         | depende do tipo — CHECK constraint espelha `CATEGORIAS_POR_TIPO` em `src/projects/financas-pessoais/db.ts` |
+| `valor`               | numeric      | not null                                                                 |
+| `descricao`           | text         | nullable                                                                 |
+| `forma_pagamento`     | text         | nullable — `pix \| dinheiro \| cartao_credito \| cartao_debito`          |
+| `mensagem_original`   | text         | texto bruto enviado pela pessoa, para auditoria                         |
+| `criado_em`           | timestamptz  | default `now()`                                                          |
+
+Categorias por tipo: `despesa` → `moradia, alimentacao, transporte, saude, assinaturas,
+lazer, cartao_fatura, outro` · `receita` → `salario, extra, outro`.
+
+Tabela `ai_usage` (compartilhada entre os dois projetos, não por projeto): `id, provider,
+modelo, tokens_input, tokens_output, custo_estimado (nullable), criado_em` — usada pelo
+comando "uso de ia" (ver seção própria acima).
+
+Os `CHECK constraints` de área/tipo + categoria em cada tabela replicam exatamente as
+regras acima — uma combinação inválida é rejeitada pelo próprio banco, não só pelo
+código.
+
+> `numeric` do Postgres volta do PostgREST como string (evita perda de precisão) — cada
+> `db.ts` converte os campos numéricos de volta para `number` logo ao ler, então o resto
+> do código (`tools.ts`, `reports.ts`, `pdf.ts` de cada projeto) nunca lida com isso
+> diretamente.
 >
-> O schema e as migrations agora vivem no Supabase (aplicadas via MCP), não mais criadas
-> pelo próprio bot no boot — `src/db.ts` só se conecta e consulta. Migrado de um SQLite
-> local (`data/gestao.db`) em 21/08/2026; o arquivo antigo não é mais usado nem lido pelo
-> bot, mas nada nele foi apagado.
+> O schema e as migrations vivem no Supabase (aplicadas via MCP), não criadas pelo
+> próprio bot no boot — `src/db.ts` só se conecta e cuida do que é compartilhado
+> (`ai_usage`). Migrado de um SQLite local (`data/gestao.db`) em 21/08/2026; o arquivo
+> antigo não é mais usado nem lido pelo bot, mas nada nele foi apagado. Separado em
+> projetos (`gestao_rural` + `financas_pessoais`) em 21/08/2026.
 
 ## Estrutura de pastas
 
 ```
 src/
   ai/
-    types.ts             # interface AIProvider comum e tipos compartilhados
-    gemini-provider.ts    # implementação via @google/genai
-    claude-provider.ts    # implementação via @anthropic-ai/sdk
-    router.ts             # AIRouter: escolhe o provider e faz fallback
-  db.ts        # cliente Supabase e queries (registro, consultas, exclusão, por área) — schema/migrations vivem no Supabase, não aqui
-  cotacao.ts   # busca a cotação do café no mercado externo (scraping, cache de 15 min)
-  tools.ts     # ferramentas expostas à IA (tool-use) e o despachante que as executa
-  parser.ts    # monta o prompt/ferramentas e delega ao AIRouter (registrar, consultar, gerar PDF ou conversar)
-  format.ts    # formatação de data para exibição (YYYY-MM-DD -> dd/mm/aaaa)
+    types.ts               # interface AIProvider comum e tipos compartilhados
+    gemini-provider.ts      # implementação via @google/genai
+    claude-provider.ts      # implementação via @anthropic-ai/sdk
+    router.ts               # AIRouter: escolhe o provider e faz fallback — nome da
+                             #   ferramenta de registrar/pdf vem por parâmetro (varia
+                             #   por projeto), lógica de roteamento em si não muda
+  projects/
+    types.ts                # Projeto ("gestao_rural" | "financas_pessoais"), ProjetoDef
+                             #   (a interface que cada projeto implementa)
+    registry.ts              # PROJETOS: Record<Projeto, ProjetoDef>
+    gestao-rural/
+      db.ts                  # Area/Categoria/CATEGORIAS_POR_AREA + CRUD sobre `entries`
+      cotacao.ts               # cotação do café no mercado externo (scraping, cache 15 min)
+      tools.ts                  # ferramentas de IA e o despachante que as executa
+      prompt.ts                  # SYSTEM_PROMPT + validação do que a IA extraiu (Zod)
+      reports.ts                  # relatório mensal em texto, agrupado por área
+      pdf.ts                       # relatório mensal em PDF, agrupado por área
+      index.ts                      # monta o ProjetoDef deste projeto
+    financas-pessoais/
+      db.ts, tools.ts, prompt.ts, reports.ts, pdf.ts, index.ts   # mesmo padrão acima,
+                                                                  #   sobre `lancamentos_pessoais`
+  db.ts        # cliente Supabase compartilhado + "uso de ia" (`ai_usage`, não é por
+               #   projeto) — schema/migrations vivem no Supabase, não aqui
+  pdf-shared.ts # primitivos de PDF compartilhados (cabeçalho, cartão, rodapé, paginação)
+  format.ts    # formatação compartilhada (datas, moeda, quantidade) — usado pelos
+               #   dois projetos
+  parser.ts    # interpretarMensagem(texto, projeto, ...): monta prompt/ferramentas do
+               #   projeto ativo e delega ao AIRouter (registrar, consultar, gerar PDF
+               #   ou conversar) — não sabe qual projeto é, só recebe um ProjetoDef
   audio.ts     # transcrição de áudio via Gemini (entende OGG/Opus nativamente)
   whatsapp.ts  # conexão Baileys (QR, filtro de remetente, áudio, envio/recebimento)
-  reports.ts   # geração dos relatórios mensais (texto), agrupados por área
-  pdf.ts       # geração do relatório mensal em PDF (pdfkit), agrupado por área
-  index.ts     # orquestração (fluxo de confirmação, exclusão, comandos especiais)
+  reports.ts   # só o relatório de "uso de ia" (compartilhado entre projetos)
+  index.ts     # orquestração: permissões por projeto, troca de contexto, fluxo de
+               #   confirmação/exclusão/comandos especiais operando sobre o projeto ativo
 auth_info/     # sessão do WhatsApp (gerada automaticamente, git-ignored)
 ```
 
@@ -298,12 +381,13 @@ recusados com um aviso.
 
 ## Limitações conhecidas do MVP
 
-- Vários números autorizados, mas sem conceito de propriedades separadas por usuário —
-  todo mundo em `WHATSAPP_NUMEROS_AUTORIZADOS` vê e registra na mesma base (a separação
-  por `area`/`local` organiza os relatórios, mas não isola produtores diferentes).
-- Confirmação pendente, exclusão pendente e memória de acompanhamento de perguntas
-  ficam em memória (`Map`); reiniciar o bot descarta qualquer confirmação, exclusão ou
-  pergunta em aberto.
+- Isolamento é por **projeto**, não por pessoa — todo mundo liberado pra `gestao_rural`
+  vê e registra na mesma base desse projeto (a separação por `area`/`local` organiza os
+  relatórios, mas não isola produtores diferentes dentro do mesmo projeto); o mesmo vale
+  pra `financas_pessoais` se um dia mais de um número for liberado nele.
+- Confirmação pendente, exclusão pendente, projeto ativo e memória de acompanhamento de
+  perguntas ficam em memória (`Map`); reiniciar o bot descarta qualquer confirmação,
+  exclusão ou pergunta em aberto, e volta todo mundo pro projeto padrão (`gestao_rural`).
 - Sem controle de estoque — não há como responder "quantas sacas ainda tenho".
 - Tem exclusão de registros (lista numerada, ver seção "Excluir registro"), mas ainda
   sem edição direta de um registro já salvo — a única forma de corrigir um erro é

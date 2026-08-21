@@ -11,7 +11,8 @@ import {
   type Area,
 } from "./db";
 import { buscarCotacaoCafe } from "./cotacao";
-import type { FerramentaDef } from "./ai/types";
+import type { FerramentaDef } from "../../ai/types";
+import type { ResultadoFerramenta } from "../types";
 
 const CATEGORIAS_SEM_VENDA = CATEGORIAS.filter((c) => c !== "venda") as [Categoria, ...Categoria[]];
 
@@ -148,12 +149,6 @@ const FiltroVendasSchema = z.object({
   fim: z.string(),
   area: z.enum(AREAS as [Area, ...Area[]]).optional(),
 });
-
-export interface ResultadoFerramenta {
-  ferramenta: string;
-  resultado?: unknown;
-  erro?: string;
-}
 
 export async function executarFerramenta(nome: string, input: unknown): Promise<ResultadoFerramenta> {
   try {
