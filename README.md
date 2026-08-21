@@ -269,7 +269,7 @@ Tabela `entries` (`gestao_rural`):
 | `id`                  | integer      | identity, autoincrement                                                  |
 | `data`                | date         | volta do cliente Supabase como string `YYYY-MM-DD`                       |
 | `area`                | text         | `cafe \| propriedade \| outro` — CHECK constraint                        |
-| `categoria`           | text         | depende da área — CHECK constraint espelha `CATEGORIAS_POR_AREA` em `src/db.ts` |
+| `categoria`           | text         | depende da área — CHECK constraint espelha `CATEGORIAS_POR_AREA` em `src/projects/gestao-rural/db.ts` |
 | `item`                | text         | nullable                                                                 |
 | `quantidade`          | numeric      | nullable                                                                 |
 | `unidade`             | text         | nullable (ex: "sacos", "kg", "litros")                                  |
