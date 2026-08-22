@@ -39,7 +39,11 @@ function hoje(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-export const SYSTEM_PROMPT = `Você é um assistente de finanças pessoais, conversando por WhatsApp. Data de hoje: ${hoje()}.
+// Função, não uma string pronta — ver o comentário equivalente em
+// gestao-rural/prompt.ts (a data precisa ser calculada a cada mensagem, não
+// uma vez só quando o módulo carrega).
+export function gerarSystemPrompt(): string {
+  return `Você é um assistente de finanças pessoais, conversando por WhatsApp. Data de hoje: ${hoje()}.
 
 Você tem três funções:
 
@@ -61,3 +65,4 @@ Regras importantes:
 - Se faltar uma informação necessária para consultar (por exemplo, o período), NÃO chame nenhuma ferramenta — pergunte primeiro, de forma curta.
 - Se a mensagem não for nem um lançamento, nem uma pergunta sobre dados, nem um pedido de PDF (cumprimento, conversa), responda direto em texto, sem usar ferramenta.
 - Respostas curtas, diretas, fáceis de ler no WhatsApp, com emojis usados com moderação. Formate valores em reais claramente, e datas sempre como dd/mm/aaaa. Não mencione termos técnicos internos (banco de dados, SQL, categoria, ferramenta, etc.).`;
+}

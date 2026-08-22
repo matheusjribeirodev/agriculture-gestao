@@ -36,7 +36,10 @@ export interface RelatorioPdf {
 export interface ProjetoDef {
   nome: Projeto;
   nomeExibicao: string;
-  systemPrompt: string;
+  // Função, não uma string pronta — precisa ser chamada a cada mensagem
+  // (ela embute a data de hoje; calculada uma vez só faria a data "travar"
+  // no dia em que o bot foi reiniciado pela última vez).
+  systemPrompt: () => string;
   ferramentas: FerramentaDef[];
   executarFerramenta: (nome: string, input: unknown) => Promise<ResultadoFerramenta>;
   nomeFerramentaRegistrar: string;

@@ -12,6 +12,9 @@ export interface ResumoCategoria {
   // Para categoria "venda" isso é receita; para as demais, despesa.
   valorTotal: number;
   quantidadesPorUnidade: Map<string, number>;
+  // Registros individuais dessa categoria — usado pra detalhar por item no
+  // relatório em texto quando há mais de um registro (ver `gerarTexto`).
+  entradas: Entry[];
 }
 
 export interface ResumoArea {
@@ -55,10 +58,12 @@ export function montarResumoPorArea(entries: Entry[]): Map<Area, ResumoArea> {
         quantidadeRegistros: 0,
         valorTotal: 0,
         quantidadesPorUnidade: new Map(),
+        entradas: [],
       });
     }
     const resumoCat = resumo.porCategoria.get(entry.categoria)!;
     resumoCat.quantidadeRegistros += 1;
+    resumoCat.entradas.push(entry);
     if (entry.custo !== null) {
       resumoCat.valorTotal += entry.custo;
     }
@@ -97,6 +102,25 @@ export function montarResumoGeral(porArea: Map<Area, ResumoArea>): ResumoGeral {
 
 function formatarPartesUnidade(porUnidade: Map<string, number>): string {
   return [...porUnidade.entries()].map(([unidade, total]) => `${formatarQuantidade(total)} ${unidade}`).join(", ");
+}
+
+// Uma categoria com só um registro já é clara na linha de resumo — o
+// detalhamento por item só ajuda (e só é mostrado) quando há mais de um
+// registro na mesma categoria, que é quando "2 registros, receita X"
+// esconde o que cada um foi de fato.
+function formatarLinhasItens(categoria: Categoria, entradas: Entry[]): string[] {
+  return entradas.map((entrada) => {
+    const rotulo = categoria === "venda" ? "receita" : "custo";
+    const partes = [entrada.item ?? "(sem item)"];
+    if (entrada.quantidade !== null) {
+      partes.push(`${formatarQuantidade(entrada.quantidade)}${entrada.unidade ? " " + entrada.unidade : ""}`);
+    }
+    if (entrada.custo !== null) {
+      partes.push(`${rotulo} ${formatarMoeda(entrada.custo)}`);
+    }
+    if (entrada.local) partes.push(entrada.local);
+    return `  · ${partes.join(", ")}`;
+  });
 }
 
 function gerarTexto(ano: number, mes: number, entries: Entry[]): string {
@@ -138,6 +162,9 @@ function gerarTexto(ano: number, mes: number, entries: Entry[]): string {
         linha += ` (${formatarPartesUnidade(resumoCat.quantidadesPorUnidade)})`;
       }
       linhas.push(linha);
+      if (resumoCat.quantidadeRegistros > 1) {
+        linhas.push(...formatarLinhasItens(categoria, resumoCat.entradas));
+      }
     }
     linhas.push("");
   }

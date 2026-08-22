@@ -47,7 +47,7 @@ export async function interpretarMensagem(
 
   const resultado = await router.interpretar(
     {
-      systemPrompt: projeto.systemPrompt,
+      systemPrompt: projeto.systemPrompt(),
       historico,
       mensagem: texto,
       ferramentas: projeto.ferramentas,

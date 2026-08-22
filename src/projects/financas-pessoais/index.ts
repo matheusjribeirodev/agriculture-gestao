@@ -2,7 +2,7 @@ import { formatarDataBR, formatarMoeda } from "../../format";
 import type { ProjetoDef, RegistroSalvo } from "../types";
 import { inserirLancamento, listarRecentes, excluirPorId, type LancamentoParaSalvar, type Lancamento } from "./db";
 import { FERRAMENTAS, executarFerramenta } from "./tools";
-import { SYSTEM_PROMPT, parseRegistro, parseArgumentosPdf } from "./prompt";
+import { gerarSystemPrompt, parseRegistro, parseArgumentosPdf } from "./prompt";
 import { gerarRelatorioTexto } from "./reports";
 import { gerarRelatorioPdf } from "./pdf";
 
@@ -35,7 +35,7 @@ function formatarLinhaRegistro(item: RegistroSalvo): string {
 export const financasPessoais: ProjetoDef = {
   nome: "financas_pessoais",
   nomeExibicao: "Finanças Pessoais",
-  systemPrompt: SYSTEM_PROMPT,
+  systemPrompt: gerarSystemPrompt,
   ferramentas: FERRAMENTAS,
   executarFerramenta,
   nomeFerramentaRegistrar: "registrar_lancamento",

@@ -8,7 +8,7 @@ import {
   type Entry,
 } from "./db";
 import { FERRAMENTAS, executarFerramenta } from "./tools";
-import { SYSTEM_PROMPT, parseRegistro, parseArgumentosPdf } from "./prompt";
+import { gerarSystemPrompt, parseRegistro, parseArgumentosPdf } from "./prompt";
 import { gerarRelatorioTexto } from "./reports";
 import { gerarRelatorioPdf } from "./pdf";
 
@@ -51,7 +51,7 @@ function formatarLinhaRegistro(item: RegistroSalvo): string {
 export const gestaoRural: ProjetoDef = {
   nome: "gestao_rural",
   nomeExibicao: "Gestão Rural",
-  systemPrompt: SYSTEM_PROMPT,
+  systemPrompt: gerarSystemPrompt,
   ferramentas: FERRAMENTAS,
   executarFerramenta,
   nomeFerramentaRegistrar: "registrar_entrada",
