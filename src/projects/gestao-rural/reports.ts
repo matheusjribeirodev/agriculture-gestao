@@ -7,6 +7,23 @@ export const NOMES_AREA: Record<Area, string> = {
   outro: "📦 Outro",
 };
 
+// Usado tanto pelo relatório em texto quanto pelo PDF (que importa daqui em
+// vez de manter sua própria cópia).
+export const NOMES_CATEGORIA: Record<Categoria, string> = {
+  adubacao: "Adubação",
+  colheita: "Colheita",
+  poda: "Poda",
+  defensivo: "Defensivo",
+  mao_de_obra: "Mão de obra",
+  venda: "Venda",
+  outro: "Outro",
+  manutencao: "Manutenção",
+  combustivel: "Combustível",
+  energia: "Energia",
+  agua: "Água",
+  insumo: "Insumo",
+};
+
 export interface ResumoCategoria {
   quantidadeRegistros: number;
   // Para categoria "venda" isso é receita; para as demais, despesa.
@@ -104,22 +121,25 @@ function formatarPartesUnidade(porUnidade: Map<string, number>): string {
   return [...porUnidade.entries()].map(([unidade, total]) => `${formatarQuantidade(total)} ${unidade}`).join(", ");
 }
 
+function pluralRegistro(n: number): string {
+  return n === 1 ? "1 registro" : `${n} registros`;
+}
+
 // Uma categoria com só um registro já é clara na linha de resumo — o
-// detalhamento por item só ajuda (e só é mostrado) quando há mais de um
-// registro na mesma categoria, que é quando "2 registros, receita X"
-// esconde o que cada um foi de fato.
-function formatarLinhasItens(categoria: Categoria, entradas: Entry[]): string[] {
+// detalhamento por item só aparece (e só ajuda) quando há mais de um
+// registro na mesma categoria, que é quando "2 registros, R$ X" esconde o
+// que cada um foi de fato.
+function formatarLinhasItens(entradas: Entry[]): string[] {
   return entradas.map((entrada) => {
-    const rotulo = categoria === "venda" ? "receita" : "custo";
     const partes = [entrada.item ?? "(sem item)"];
     if (entrada.quantidade !== null) {
       partes.push(`${formatarQuantidade(entrada.quantidade)}${entrada.unidade ? " " + entrada.unidade : ""}`);
     }
     if (entrada.custo !== null) {
-      partes.push(`${rotulo} ${formatarMoeda(entrada.custo)}`);
+      partes.push(formatarMoeda(entrada.custo));
     }
     if (entrada.local) partes.push(entrada.local);
-    return `  · ${partes.join(", ")}`;
+    return `  ↳ ${partes.join(" — ")}`;
   });
 }
 
@@ -133,47 +153,57 @@ function gerarTexto(ano: number, mes: number, entries: Entry[]): string {
   const porArea = montarResumoPorArea(entries);
 
   const linhas: string[] = [];
-  linhas.push(`Relatório de ${nomeMes}/${ano}`);
+  linhas.push(`📊 *Relatório de ${nomeMes}/${ano}*`);
   linhas.push("");
 
   for (const area of AREAS) {
     const resumo = porArea.get(area);
     if (!resumo) continue;
 
-    linhas.push(NOMES_AREA[area]);
-    linhas.push(`Despesas: ${formatarMoeda(resumo.despesaTotal)}`);
+    linhas.push(`*${NOMES_AREA[area]}*`);
+    // Só mostra o que tem dado — sem "R$ 0,00" ou "nenhum registro" ocupando
+    // espaço à toa.
+    if (resumo.despesaTotal > 0) {
+      linhas.push(`Despesas: ${formatarMoeda(resumo.despesaTotal)}`);
+    }
     if (resumo.receitaTotal > 0) {
       linhas.push(`Receita (vendas): ${formatarMoeda(resumo.receitaTotal)}`);
     }
-    linhas.push(
-      resumo.colhidoPorUnidade.size > 0
-        ? `Colhido: ${formatarPartesUnidade(resumo.colhidoPorUnidade)}`
-        : "Colhido: nenhum registro de colheita",
-    );
+    if (resumo.colhidoPorUnidade.size > 0) {
+      linhas.push(`Colhido: ${formatarPartesUnidade(resumo.colhidoPorUnidade)}`);
+    }
 
+    linhas.push("");
     linhas.push("Por categoria:");
     for (const [categoria, resumoCat] of resumo.porCategoria) {
-      let linha = `- ${categoria}: ${resumoCat.quantidadeRegistros} registro(s)`;
-      if (resumoCat.valorTotal > 0) {
-        const rotulo = categoria === "venda" ? "receita" : "custo";
-        linha += `, ${rotulo} ${formatarMoeda(resumoCat.valorTotal)}`;
-      }
-      if (resumoCat.quantidadesPorUnidade.size > 0) {
-        linha += ` (${formatarPartesUnidade(resumoCat.quantidadesPorUnidade)})`;
+      const detalhado = resumoCat.quantidadeRegistros > 1;
+      let linha = `• ${NOMES_CATEGORIA[categoria]}: ${pluralRegistro(resumoCat.quantidadeRegistros)}`;
+      // Com mais de um registro, o valor/quantidade agregado some daqui —
+      // fica só no detalhamento por item + total, pra não repetir a mesma
+      // informação duas vezes.
+      if (!detalhado) {
+        if (resumoCat.valorTotal > 0) linha += ` — ${formatarMoeda(resumoCat.valorTotal)}`;
+        if (resumoCat.quantidadesPorUnidade.size > 0) {
+          linha += ` (${formatarPartesUnidade(resumoCat.quantidadesPorUnidade)})`;
+        }
       }
       linhas.push(linha);
-      if (resumoCat.quantidadeRegistros > 1) {
-        linhas.push(...formatarLinhasItens(categoria, resumoCat.entradas));
+      if (detalhado) {
+        linhas.push(...formatarLinhasItens(resumoCat.entradas));
+        if (resumoCat.valorTotal > 0) {
+          linhas.push(`  Total: ${formatarMoeda(resumoCat.valorTotal)}`);
+        }
       }
     }
     linhas.push("");
   }
 
   const geral = montarResumoGeral(porArea);
-  linhas.push("Resumo geral");
+  linhas.push("━━━━━━━━━━━━━━━");
+  linhas.push("📋 *Resumo geral*");
   linhas.push(`Despesa total: ${formatarMoeda(geral.despesaTotal)}`);
   linhas.push(`Receita total: ${formatarMoeda(geral.receitaTotal)}`);
-  linhas.push(`Saldo: ${formatarMoeda(geral.receitaTotal - geral.despesaTotal)}`);
+  linhas.push(`💰 *Saldo: ${formatarMoeda(geral.receitaTotal - geral.despesaTotal)}*`);
 
   return linhas.join("\n").trimEnd();
 }

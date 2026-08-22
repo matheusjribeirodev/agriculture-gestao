@@ -1,4 +1,4 @@
-import { buscarEntriesPorPeriodo, AREAS, type Entry, type Categoria, type Area } from "./db";
+import { buscarEntriesPorPeriodo, AREAS, type Entry, type Area } from "./db";
 import { NOMES_MES, obterIntervaloMes, formatarMoeda, formatarQuantidade } from "../../format";
 import {
   COR_PRIMARIA,
@@ -11,7 +11,7 @@ import {
   garantirEspaco,
   gerarPdfComRodape,
 } from "../../pdf-shared";
-import { montarResumoPorArea, montarResumoGeral, type ResumoArea } from "./reports";
+import { montarResumoPorArea, montarResumoGeral, NOMES_CATEGORIA, type ResumoArea } from "./reports";
 import type { RelatorioPdf } from "../types";
 
 // Nomes de área sem emoji: a fonte padrão do pdfkit (Helvetica/WinAnsi) não
@@ -21,21 +21,6 @@ const NOMES_AREA_PDF: Record<Area, string> = {
   cafe: "Café",
   propriedade: "Propriedade",
   outro: "Outro",
-};
-
-const NOMES_CATEGORIA: Record<Categoria, string> = {
-  adubacao: "Adubação",
-  colheita: "Colheita",
-  poda: "Poda",
-  defensivo: "Defensivo",
-  mao_de_obra: "Mão de obra",
-  venda: "Venda",
-  outro: "Outro",
-  manutencao: "Manutenção",
-  combustivel: "Combustível",
-  energia: "Energia",
-  agua: "Água",
-  insumo: "Insumo",
 };
 
 function desenharSecaoArea(doc: PDFKit.PDFDocument, larguraPagina: number, area: Area, resumo: ResumoArea, y: number): number {
