@@ -1,5 +1,5 @@
 import { buscarEntriesPorPeriodo, AREAS, type Entry, type Categoria, type Area } from "./db";
-import { NOMES_MES, obterIntervaloMes, formatarMoeda, formatarQuantidade } from "../../format";
+import { NOMES_MES, obterIntervaloMes, formatarMoeda, formatarQuantidade, formatarDataBR } from "../../format";
 
 export const NOMES_AREA: Record<Area, string> = {
   cafe: "☕ Café",
@@ -131,7 +131,7 @@ function pluralRegistro(n: number): string {
 // que cada um foi de fato.
 function formatarLinhasItens(entradas: Entry[]): string[] {
   return entradas.map((entrada) => {
-    const partes = [entrada.item ?? "(sem item)"];
+    const partes = [formatarDataBR(entrada.data), entrada.item ?? "(sem item)"];
     if (entrada.quantidade !== null) {
       partes.push(`${formatarQuantidade(entrada.quantidade)}${entrada.unidade ? " " + entrada.unidade : ""}`);
     }

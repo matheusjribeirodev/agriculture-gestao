@@ -39,7 +39,11 @@ export const FERRAMENTAS: FerramentaDef[] = [
         quantidade: { type: ["number", "null"] },
         unidade: { type: ["string", "null"], description: 'Ex: "sacos", "kg", "litros", "diárias".' },
         custo: { type: ["number", "null"], description: "Valor em reais. Para categoria 'venda', é o valor recebido (receita), não uma despesa." },
-        local: { type: ["string", "null"], description: 'Local dentro da propriedade, ex: "Talhão 3", "Curral", "Galpão", "Represa".' },
+        local: {
+          type: ["string", "null"],
+          description:
+            'Local dentro da propriedade (ex: "Talhão 3", "Curral", "Galpão", "Represa") OU, para categoria "venda", o destino/comprador quando mencionado (ex: "Cido Baubau", "Cooperativa X") — o nome de pra quem ou pra onde foi vendido.',
+        },
         observacao: { type: ["string", "null"] },
       },
       required: ["data", "area", "categoria", "item", "quantidade", "unidade", "custo", "local", "observacao"],
