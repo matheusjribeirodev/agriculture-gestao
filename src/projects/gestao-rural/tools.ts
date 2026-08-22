@@ -32,7 +32,7 @@ export const FERRAMENTAS: FerramentaDef[] = [
         area: {
           type: "string",
           enum: AREAS,
-          description: `Área da propriedade a que o registro pertence. "cafe" para atividades da lavoura de café, "propriedade" para manutenção/infraestrutura geral (trator, cerca, energia, água), "outro" para o que não encaixa nas duas. Categorias válidas por área: ${DESCRICAO_AREA_CATEGORIA}.`,
+          description: `Área da propriedade a que o registro pertence. "cafe" para atividades da lavoura de café, "propriedade" para manutenção/infraestrutura geral (trator, cerca, energia, água) E TAMBÉM qualquer produção/produto/animal da propriedade que não seja café (banana, milho, gado etc.), "outro" só pro que realmente não é nem café nem parte da propriedade (raro). Categorias válidas por área: ${DESCRICAO_AREA_CATEGORIA}.`,
         },
         categoria: { type: "string", enum: CATEGORIAS, description: "Deve ser uma categoria válida para a área escolhida." },
         item: { type: ["string", "null"], description: "Nome do insumo, produto ou atividade." },
