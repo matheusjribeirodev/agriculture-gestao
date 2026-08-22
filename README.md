@@ -126,9 +126,11 @@ de um pro outro.
    - **"excluir registro"** / "apagar lançamento" (qualquer conjugação de apagar/excluir/deletar/remover + registro/lançamento/entrada) → lista os 10 registros mais recentes numerados para escolher qual excluir (ver seção "Excluir registro")
 
    O relatório é organizado por área — cada uma com suas próprias despesas e receita
-   (vendas), detalhado por categoria — e termina com um resumo geral (despesa total,
-   receita total, saldo). Áreas sem nenhum lançamento no período não aparecem. Colheita
-   é só mais uma categoria dentre as outras, sem tratamento especial no relatório.
+   (vendas), detalhadas em blocos separados por categoria ("Despesas por categoria" e
+   "Receita por categoria" — nunca misturados, pra não parecer que tudo é o mesmo tipo
+   de valor) — e termina com um resumo geral (despesa total, receita total, saldo). Áreas
+   sem nenhum lançamento no período não aparecem. Colheita é só mais uma categoria dentre
+   as outras, sem tratamento especial no relatório.
 
    Em **finanças pessoais**, o mesmo comando gera um relatório no mesmo estilo, só que
    organizado por despesas e receitas (em vez de área): despesas detalhadas por
@@ -310,6 +312,16 @@ lazer, cartao_fatura, outro` · `receita` → `salario, extra, outro`.
 Tabela `ai_usage` (compartilhada entre os dois projetos, não por projeto): `id, provider,
 modelo, tokens_input, tokens_output, custo_estimado (nullable), criado_em` — usada pelo
 comando "uso de ia" (ver seção própria acima).
+
+Tabela `mensagens` (compartilhada, log bruto de toda mensagem trocada com o bot — dos
+dois lados, independente de projeto): `id, numero, direcao (recebida | enviada), texto,
+criado_em`. Gravada por `registrarMensagem` em `src/db.ts`, chamada direto de
+`src/whatsapp.ts` (mensagem recebida — já transcrita, se era áudio, com prefixo `[áudio]`
+— e toda mensagem enviada, inclusive avisos intermediários tipo "Transcrevendo seu
+áudio..."). É só um log de auditoria/visualização (usado pela página "Mensagens" do
+site) — não tem relação com `mensagem_original` das outras tabelas, que só guarda o
+texto que virou um lançamento salvo. Só existe daqui pra frente; não há como reconstruir
+conversas anteriores à criação dessa tabela.
 
 Os `CHECK constraints` de área/tipo + categoria em cada tabela replicam exatamente as
 regras acima — uma combinação inválida é rejeitada pelo próprio banco, não só pelo

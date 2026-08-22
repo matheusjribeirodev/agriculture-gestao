@@ -12,6 +12,7 @@ import qrcode from "qrcode-terminal";
 import pino from "pino";
 import path from "node:path";
 import { transcreverAudio, duracaoValida, DURACAO_MAXIMA_SEGUNDOS } from "./audio";
+import { registrarMensagem } from "./db";
 
 const AUTH_DIR = path.join(__dirname, "..", "auth_info");
 const logger = pino({ level: "silent" });
@@ -58,6 +59,8 @@ export async function conectarWhatsApp(
     if (enviada?.key.id) {
       mensagensDoBot.add(enviada.key.id);
     }
+    const numero = identificarRemetente(jid, numerosAutorizados, lidsPorNumero);
+    if (numero) await registrarMensagem(numero, "enviada", texto);
   }
 
   async function enviarDocumentoParaJid(
@@ -70,6 +73,8 @@ export async function conectarWhatsApp(
     if (enviada?.key.id) {
       mensagensDoBot.add(enviada.key.id);
     }
+    const numero = identificarRemetente(jid, numerosAutorizados, lidsPorNumero);
+    if (numero) await registrarMensagem(numero, "enviada", `[documento] ${nomeArquivo}`);
   }
 
   function iniciarSocket(): WASocket {
@@ -218,6 +223,9 @@ async function tratarMensagem(
 
     // Responder sempre para o mesmo JID de onde a mensagem chegou.
     definirJidResposta(numero, remetenteJid);
+
+    const textoLog = msg.message?.audioMessage ? `[áudio] ${texto.trim()}` : texto.trim();
+    await registrarMensagem(numero, "recebida", textoLog);
 
     await onMensagem(texto.trim(), numero);
   } catch (err) {

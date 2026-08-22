@@ -115,6 +115,37 @@ function pluralRegistro(n: number): string {
 // detalhamento por item só aparece (e só ajuda) quando há mais de um
 // registro na mesma categoria, que é quando "2 registros, R$ X" esconde o
 // que cada um foi de fato.
+function formatarBlocoCategorias(categorias: [Categoria, ResumoCategoria][]): string[] {
+  const linhas: string[] = [];
+  for (const [categoria, resumoCat] of categorias) {
+    const detalhado = resumoCat.quantidadeRegistros > 1;
+    const entrada = resumoCat.entradas[0];
+    // Com um só registro, mostra a data dele no lugar de "1 registro" (já
+    // é óbvio que é um só) — com mais de um, o valor/quantidade agregado
+    // some daqui e some junto o "N registros", já que o detalhamento por
+    // item (com data em cada linha) + total abaixo cobre isso melhor.
+    let linha = detalhado
+      ? `• ${NOMES_CATEGORIA[categoria]}: ${pluralRegistro(resumoCat.quantidadeRegistros)}`
+      : `• ${NOMES_CATEGORIA[categoria]}: ${formatarDataBR(entrada.data)}`;
+    if (!detalhado) {
+      if (entrada.item) linha += ` — ${entrada.item}`;
+      if (resumoCat.valorTotal > 0) linha += ` — ${formatarMoeda(resumoCat.valorTotal)}`;
+      if (resumoCat.quantidadesPorUnidade.size > 0) {
+        linha += ` (${formatarPartesUnidade(resumoCat.quantidadesPorUnidade)})`;
+      }
+      if (entrada.local) linha += ` — ${entrada.local}`;
+    }
+    linhas.push(linha);
+    if (detalhado) {
+      linhas.push(...formatarLinhasItens(resumoCat.entradas));
+      if (resumoCat.valorTotal > 0) {
+        linhas.push(`  Total: ${formatarMoeda(resumoCat.valorTotal)}`);
+      }
+    }
+  }
+  return linhas;
+}
+
 function formatarLinhasItens(entradas: Entry[]): string[] {
   return entradas.map((entrada) => {
     const partes = [formatarDataBR(entrada.data), entrada.item ?? "(sem item)"];
@@ -155,31 +186,22 @@ function gerarTexto(ano: number, mes: number, entries: Entry[]): string {
       linhas.push(`Receita (vendas): ${formatarMoeda(resumo.receitaTotal)}`);
     }
 
-    linhas.push("");
-    linhas.push("Por categoria:");
-    for (const [categoria, resumoCat] of resumo.porCategoria) {
-      const detalhado = resumoCat.quantidadeRegistros > 1;
-      // Com um só registro, mostra a data dele no lugar de "1 registro" (já
-      // é óbvio que é um só) — com mais de um, o valor/quantidade agregado
-      // some daqui e some junto o "N registros", já que o detalhamento por
-      // item (com data em cada linha) + total abaixo cobre isso melhor.
-      let linha = detalhado
-        ? `• ${NOMES_CATEGORIA[categoria]}: ${pluralRegistro(resumoCat.quantidadeRegistros)}`
-        : `• ${NOMES_CATEGORIA[categoria]}: ${formatarDataBR(resumoCat.entradas[0].data)}`;
-      if (!detalhado) {
-        if (resumoCat.valorTotal > 0) linha += ` — ${formatarMoeda(resumoCat.valorTotal)}`;
-        if (resumoCat.quantidadesPorUnidade.size > 0) {
-          linha += ` (${formatarPartesUnidade(resumoCat.quantidadesPorUnidade)})`;
-        }
-        if (resumoCat.entradas[0].local) linha += ` — ${resumoCat.entradas[0].local}`;
-      }
-      linhas.push(linha);
-      if (detalhado) {
-        linhas.push(...formatarLinhasItens(resumoCat.entradas));
-        if (resumoCat.valorTotal > 0) {
-          linhas.push(`  Total: ${formatarMoeda(resumoCat.valorTotal)}`);
-        }
-      }
+    // Despesa e receita (venda) nunca aparecem no mesmo bloco — misturar as
+    // duas sob um "Por categoria" único deixa parecer que tudo é do mesmo
+    // tipo de valor, quando na verdade um é gasto e o outro é dinheiro
+    // entrando.
+    const categoriasDespesa = [...resumo.porCategoria].filter(([categoria]) => categoria !== "venda");
+    const categoriasReceita = [...resumo.porCategoria].filter(([categoria]) => categoria === "venda");
+
+    if (categoriasDespesa.length > 0) {
+      linhas.push("");
+      linhas.push("Despesas por categoria:");
+      linhas.push(...formatarBlocoCategorias(categoriasDespesa));
+    }
+    if (categoriasReceita.length > 0) {
+      linhas.push("");
+      linhas.push("Receita por categoria:");
+      linhas.push(...formatarBlocoCategorias(categoriasReceita));
     }
     linhas.push("");
   }

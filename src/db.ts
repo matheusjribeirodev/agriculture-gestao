@@ -46,6 +46,22 @@ export async function registrarUsoIA(uso: UsoIA): Promise<void> {
   }
 }
 
+export type DirecaoMensagem = "recebida" | "enviada";
+
+// Log bruto de toda mensagem trocada com o bot (dos dois lados), usado pela
+// página "Mensagens" do site — não tem relação com `mensagem_original` das
+// tabelas de registro, que só guarda o texto que virou um lançamento salvo.
+export async function registrarMensagem(numero: string, direcao: DirecaoMensagem, texto: string): Promise<void> {
+  try {
+    const { error } = await supabase.from("mensagens").insert({ numero, direcao, texto });
+    if (error) throw error;
+  } catch (err) {
+    // Mesma regra de registrarUsoIA: falha ao logar nunca derruba uma
+    // resposta real ao produtor.
+    console.error("Erro ao registrar mensagem:", err);
+  }
+}
+
 export interface ResumoUsoIA {
   provider: string;
   chamadas: number;
