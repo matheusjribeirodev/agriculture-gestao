@@ -161,11 +161,10 @@ function gerarTexto(ano: number, mes: number, entries: Entry[]): string {
     if (!resumo) continue;
 
     linhas.push(`*${NOMES_AREA[area]}*`);
-    // Só mostra o que tem dado — sem "R$ 0,00" ou "nenhum registro" ocupando
-    // espaço à toa.
-    if (resumo.despesaTotal > 0) {
-      linhas.push(`Despesas: ${formatarMoeda(resumo.despesaTotal)}`);
-    }
+    // "Despesas" sempre aparece (mesmo zerada) — é o campo principal de toda
+    // área. Receita/colhido só aparecem quando têm dado, pra não sobrar
+    // "nenhum registro" ocupando espaço à toa.
+    linhas.push(`Despesas: ${formatarMoeda(resumo.despesaTotal)}`);
     if (resumo.receitaTotal > 0) {
       linhas.push(`Receita (vendas): ${formatarMoeda(resumo.receitaTotal)}`);
     }
