@@ -11,7 +11,7 @@ import {
   garantirEspaco,
   gerarPdfComRodape,
 } from "../../pdf-shared";
-import { montarResumo } from "./reports";
+import { montarResumo, NOMES_CATEGORIA, NOMES_FORMA_PAGAMENTO } from "./reports";
 import type { RelatorioPdf } from "../types";
 
 function desenharTabela(
@@ -103,18 +103,18 @@ function desenharRelatorio(doc: PDFKit.PDFDocument, larguraPagina: number, ano: 
 
   const linhasDespesa = [...resumo.porCategoriaDespesa.entries()]
     .sort((a, b) => b[1].valorTotal - a[1].valorTotal)
-    .map(([categoria, r]) => ({ rotulo: categoria, extra: String(r.quantidadeRegistros), valor: formatarMoeda(r.valorTotal) }));
+    .map(([categoria, r]) => ({ rotulo: NOMES_CATEGORIA[categoria] ?? categoria, extra: String(r.quantidadeRegistros), valor: formatarMoeda(r.valorTotal) }));
   y = desenharTabela(doc, larguraPagina, "Despesas por categoria", linhasDespesa, y);
 
   const linhasReceita = [...resumo.porCategoriaReceita.entries()]
     .sort((a, b) => b[1].valorTotal - a[1].valorTotal)
-    .map(([categoria, r]) => ({ rotulo: categoria, extra: String(r.quantidadeRegistros), valor: formatarMoeda(r.valorTotal) }));
+    .map(([categoria, r]) => ({ rotulo: NOMES_CATEGORIA[categoria] ?? categoria, extra: String(r.quantidadeRegistros), valor: formatarMoeda(r.valorTotal) }));
   y = desenharTabela(doc, larguraPagina, "Receitas por categoria", linhasReceita, y);
 
   if (resumo.porFormaPagamento.size > 0) {
     const linhasForma = [...resumo.porFormaPagamento.entries()]
       .sort((a, b) => b[1] - a[1])
-      .map(([forma, total]) => ({ rotulo: forma, extra: "", valor: formatarMoeda(total) }));
+      .map(([forma, total]) => ({ rotulo: NOMES_FORMA_PAGAMENTO[forma] ?? forma, extra: "", valor: formatarMoeda(total) }));
     desenharTabela(doc, larguraPagina, "Despesas por forma de pagamento", linhasForma, y);
   }
 }

@@ -29,15 +29,9 @@ function desenharSecaoArea(doc: PDFKit.PDFDocument, larguraPagina: number, area:
   doc.fillColor(COR_TEXTO).font("Helvetica-Bold").fontSize(14).text(NOMES_AREA_PDF[area], 50, y);
   y += 20;
 
-  const colhidoTexto =
-    resumo.colhidoPorUnidade.size > 0
-      ? [...resumo.colhidoPorUnidade.entries()].map(([u, q]) => `${formatarQuantidade(q)} ${u}`).join(", ")
-      : null;
-
   doc.font("Helvetica").fontSize(10).fillColor(COR_TEXTO);
   let linhaResumo = `Despesas: ${formatarMoeda(resumo.despesaTotal)}`;
   if (resumo.receitaTotal > 0) linhaResumo += `   |   Receita: ${formatarMoeda(resumo.receitaTotal)}`;
-  if (colhidoTexto) linhaResumo += `   |   Colhido: ${colhidoTexto}`;
   doc.text(linhaResumo, 50, y, { width: larguraPagina });
   y += 22;
 
@@ -116,15 +110,10 @@ function desenharRelatorio(doc: PDFKit.PDFDocument, larguraPagina: number, ano: 
 
   let y = 130;
   const espacamento = 15;
-  const larguraCard = (larguraPagina - espacamento * 3) / 4;
+  const larguraCard = (larguraPagina - espacamento * 2) / 3;
   desenharCard(doc, 50, y, larguraCard, "Despesa total", formatarMoeda(geral.despesaTotal));
   desenharCard(doc, 50 + (larguraCard + espacamento), y, larguraCard, "Receita total", formatarMoeda(geral.receitaTotal));
   desenharCard(doc, 50 + (larguraCard + espacamento) * 2, y, larguraCard, "Saldo", formatarMoeda(geral.receitaTotal - geral.despesaTotal));
-  const colhidoTexto =
-    geral.colhidoPorUnidade.size > 0
-      ? [...geral.colhidoPorUnidade.entries()].map(([u, q]) => `${formatarQuantidade(q)} ${u}`).join(", ")
-      : "Nenhum registro";
-  desenharCard(doc, 50 + (larguraCard + espacamento) * 3, y, larguraCard, "Total colhido", colhidoTexto);
 
   y += 110;
 

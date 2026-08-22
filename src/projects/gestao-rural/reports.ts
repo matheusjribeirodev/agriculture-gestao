@@ -37,7 +37,6 @@ export interface ResumoCategoria {
 export interface ResumoArea {
   despesaTotal: number;
   receitaTotal: number;
-  colhidoPorUnidade: Map<string, number>;
   porCategoria: Map<Categoria, ResumoCategoria>;
 }
 
@@ -49,7 +48,6 @@ export function montarResumoPorArea(entries: Entry[]): Map<Area, ResumoArea> {
       porArea.set(entry.area, {
         despesaTotal: 0,
         receitaTotal: 0,
-        colhidoPorUnidade: new Map(),
         porCategoria: new Map(),
       });
     }
@@ -61,13 +59,6 @@ export function montarResumoPorArea(entries: Entry[]): Map<Area, ResumoArea> {
       } else {
         resumo.despesaTotal += entry.custo;
       }
-    }
-
-    if (entry.categoria === "colheita" && entry.quantidade !== null && entry.unidade) {
-      resumo.colhidoPorUnidade.set(
-        entry.unidade,
-        (resumo.colhidoPorUnidade.get(entry.unidade) ?? 0) + entry.quantidade,
-      );
     }
 
     if (!resumo.porCategoria.has(entry.categoria)) {
@@ -98,23 +89,18 @@ export function montarResumoPorArea(entries: Entry[]): Map<Area, ResumoArea> {
 export interface ResumoGeral {
   despesaTotal: number;
   receitaTotal: number;
-  colhidoPorUnidade: Map<string, number>;
 }
 
 export function montarResumoGeral(porArea: Map<Area, ResumoArea>): ResumoGeral {
   let despesaTotal = 0;
   let receitaTotal = 0;
-  const colhidoPorUnidade = new Map<string, number>();
 
   for (const resumo of porArea.values()) {
     despesaTotal += resumo.despesaTotal;
     receitaTotal += resumo.receitaTotal;
-    for (const [unidade, quantidade] of resumo.colhidoPorUnidade) {
-      colhidoPorUnidade.set(unidade, (colhidoPorUnidade.get(unidade) ?? 0) + quantidade);
-    }
   }
 
-  return { despesaTotal, receitaTotal, colhidoPorUnidade };
+  return { despesaTotal, receitaTotal };
 }
 
 function formatarPartesUnidade(porUnidade: Map<string, number>): string {
@@ -162,14 +148,11 @@ function gerarTexto(ano: number, mes: number, entries: Entry[]): string {
 
     linhas.push(`*${NOMES_AREA[area]}*`);
     // "Despesas" sempre aparece (mesmo zerada) — é o campo principal de toda
-    // área. Receita/colhido só aparecem quando têm dado, pra não sobrar
-    // "nenhum registro" ocupando espaço à toa.
+    // área. Receita só aparece quando tem dado, pra não sobrar "nenhum
+    // registro" ocupando espaço à toa.
     linhas.push(`Despesas: ${formatarMoeda(resumo.despesaTotal)}`);
     if (resumo.receitaTotal > 0) {
       linhas.push(`Receita (vendas): ${formatarMoeda(resumo.receitaTotal)}`);
-    }
-    if (resumo.colhidoPorUnidade.size > 0) {
-      linhas.push(`Colhido: ${formatarPartesUnidade(resumo.colhidoPorUnidade)}`);
     }
 
     linhas.push("");

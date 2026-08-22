@@ -125,10 +125,17 @@ de um pro outro.
    - **"uso de ia mês passado"** → mesma coisa, mês anterior
    - **"excluir registro"** / "apagar lançamento" (qualquer conjugação de apagar/excluir/deletar/remover + registro/lançamento/entrada) → lista os 10 registros mais recentes numerados para escolher qual excluir (ver seção "Excluir registro")
 
-   O relatório é organizado por área — cada uma com suas próprias despesas, receita
-   (vendas) e total colhido, detalhado por categoria — e termina com um resumo geral
-   (despesa total, receita total, saldo). Áreas sem nenhum lançamento no período não
-   aparecem.
+   O relatório é organizado por área — cada uma com suas próprias despesas e receita
+   (vendas), detalhado por categoria — e termina com um resumo geral (despesa total,
+   receita total, saldo). Áreas sem nenhum lançamento no período não aparecem. Colheita
+   é só mais uma categoria dentre as outras, sem tratamento especial no relatório.
+
+   Em **finanças pessoais**, o mesmo comando gera um relatório no mesmo estilo, só que
+   organizado por despesas e receitas (em vez de área): despesas detalhadas por
+   categoria e por forma de pagamento, receitas detalhadas por categoria — em ambos os
+   casos, uma categoria com 2+ lançamentos no período ganha detalhamento item a item
+   (data, descrição, valor e forma de pagamento de cada um). Receitas só aparecem se
+   houver alguma no período.
 
 ## Perguntas sobre os dados
 
@@ -221,9 +228,9 @@ numa VM de 1GB) com cabeçalho, cartões de resumo e uma tabela por categoria, r
 data de geração e numeração de página. Os primitivos de desenho (cabeçalho, cartão,
 rodapé, paginação — inclusive a lógica de quebra de página, que já teve um bug corrigido)
 ficam em `src/pdf-shared.ts`, compartilhados pelos dois projetos; cada um desenha seu
-próprio conteúdo (`src/projects/gestao-rural/pdf.ts` — despesa/receita/saldo/colhido por
-área — e `src/projects/financas-pessoais/pdf.ts` — despesa/receita/saldo por categoria e
-por forma de pagamento).
+próprio conteúdo (`src/projects/gestao-rural/pdf.ts` — despesa/receita/saldo por área —
+e `src/projects/financas-pessoais/pdf.ts` — despesa/receita/saldo por categoria e por
+forma de pagamento).
 
 Esse comando exato é só um atalho rápido (evita gastar tokens de IA no caso óbvio) — na
 prática, qualquer pedido de PDF/arquivo/documento passa pela ferramenta de IA
