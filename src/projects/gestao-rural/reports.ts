@@ -176,15 +176,19 @@ function gerarTexto(ano: number, mes: number, entries: Entry[]): string {
     linhas.push("Por categoria:");
     for (const [categoria, resumoCat] of resumo.porCategoria) {
       const detalhado = resumoCat.quantidadeRegistros > 1;
-      let linha = `• ${NOMES_CATEGORIA[categoria]}: ${pluralRegistro(resumoCat.quantidadeRegistros)}`;
-      // Com mais de um registro, o valor/quantidade agregado some daqui —
-      // fica só no detalhamento por item + total, pra não repetir a mesma
-      // informação duas vezes.
+      // Com um só registro, mostra a data dele no lugar de "1 registro" (já
+      // é óbvio que é um só) — com mais de um, o valor/quantidade agregado
+      // some daqui e some junto o "N registros", já que o detalhamento por
+      // item (com data em cada linha) + total abaixo cobre isso melhor.
+      let linha = detalhado
+        ? `• ${NOMES_CATEGORIA[categoria]}: ${pluralRegistro(resumoCat.quantidadeRegistros)}`
+        : `• ${NOMES_CATEGORIA[categoria]}: ${formatarDataBR(resumoCat.entradas[0].data)}`;
       if (!detalhado) {
         if (resumoCat.valorTotal > 0) linha += ` — ${formatarMoeda(resumoCat.valorTotal)}`;
         if (resumoCat.quantidadesPorUnidade.size > 0) {
           linha += ` (${formatarPartesUnidade(resumoCat.quantidadesPorUnidade)})`;
         }
+        if (resumoCat.entradas[0].local) linha += ` — ${resumoCat.entradas[0].local}`;
       }
       linhas.push(linha);
       if (detalhado) {
