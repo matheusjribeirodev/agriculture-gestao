@@ -398,6 +398,51 @@ recusados com um aviso.
 > transcrição por Gemini consome tokens (bem barato) e envia o áudio para o Google, em
 > vez de rodar local.
 
+## Monitoramento (watchdog)
+
+O bot roda numa única VM, sem redundância — se o processo travar ou a VM ficar sem
+memória, ninguém fica sabendo até reparar que o bot parou de responder. `scripts/
+watchdog.sh` cobre isso: roda fora do processo do bot (via systemd timer, não faz parte
+do `pm2 start`), a cada 5 minutos, e checa duas coisas:
+
+1. `pm2 jlist` — o processo `bot-rural` está com status `online`?
+2. `.heartbeat` — arquivo com o timestamp da última vez que a conexão com o WhatsApp
+   confirmou estar aberta (atualizado por `src/whatsapp.ts` a cada 2 minutos enquanto
+   conectado). Se esse arquivo ficar parado por mais de 8 minutos, o bot pode estar preso
+   num loop de reconexão sem nunca se recuperar.
+
+Se qualquer um dos dois falhar, manda um aviso via [ntfy.sh](https://ntfy.sh) (serviço
+gratuito de notificação push, sem precisar de conta — só escolher um "tópico" e assinar
+pelo app) pro tópico configurado em `NTFY_TOPIC` no `.env`. Manda um aviso só na
+transição pra "caído" (não repete a cada execução do timer enquanto o problema persiste)
+e um aviso de "voltou ao normal" quando detecta recuperação.
+
+Configuração na VM (fora do `git pull` normal, feita uma vez):
+```
+chmod +x scripts/watchdog.sh
+sudo tee /etc/systemd/system/bot-rural-watchdog.service > /dev/null <<'EOF'
+[Unit]
+Description=Watchdog do bot-rural
+
+[Service]
+Type=oneshot
+ExecStart=/home/ubuntu/bot-gestao-rural/scripts/watchdog.sh
+EOF
+sudo tee /etc/systemd/system/bot-rural-watchdog.timer > /dev/null <<'EOF'
+[Unit]
+Description=Roda o watchdog do bot-rural a cada 5 minutos
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target
+EOF
+sudo systemctl daemon-reload
+sudo systemctl enable --now bot-rural-watchdog.timer
+```
+
 ## Limitações conhecidas do MVP
 
 - Isolamento é por **projeto**, não por pessoa — todo mundo liberado pra `gestao_rural`

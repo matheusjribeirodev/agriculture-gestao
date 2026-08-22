@@ -4,3 +4,5 @@ auth_info/
 data/
 .env
 *.log
+.heartbeat
+.watchdog-estado

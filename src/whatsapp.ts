@@ -11,11 +11,24 @@ import { Boom } from "@hapi/boom";
 import qrcode from "qrcode-terminal";
 import pino from "pino";
 import path from "node:path";
+import fs from "node:fs";
 import { transcreverAudio, duracaoValida, DURACAO_MAXIMA_SEGUNDOS } from "./audio";
 import { registrarMensagem } from "./db";
 
 const AUTH_DIR = path.join(__dirname, "..", "auth_info");
+// Arquivo simples com o timestamp da última confirmação de que a conexão
+// com o WhatsApp está de pé — lido por `scripts/watchdog.sh` (rodando fora
+// do processo do bot, via systemd timer) pra alertar se o bot cair.
+const HEARTBEAT_PATH = path.join(__dirname, "..", ".heartbeat");
 const logger = pino({ level: "silent" });
+
+function atualizarHeartbeat(): void {
+  try {
+    fs.writeFileSync(HEARTBEAT_PATH, new Date().toISOString());
+  } catch (err) {
+    console.error("Erro ao atualizar heartbeat:", err);
+  }
+}
 
 // `remetente` é o número autorizado (do jeito que está no .env) que enviou a
 // mensagem — usado como identidade estável em memória (confirmações
@@ -36,6 +49,14 @@ export async function conectarWhatsApp(
   const { version } = await fetchLatestBaileysVersion();
 
   let sock: WASocket = iniciarSocket();
+
+  // Só atualiza o heartbeat periodicamente enquanto a conexão está de pé —
+  // se ficar preso reconectando (sem nunca abrir de novo), o arquivo fica
+  // parado no tempo e o watchdog detecta.
+  let conexaoAberta = false;
+  setInterval(() => {
+    if (conexaoAberta) atualizarHeartbeat();
+  }, 2 * 60 * 1000);
 
   // IDs de mensagens enviadas pelo próprio bot, para não reprocessá-las
   // como se fossem mensagens novas.
@@ -97,6 +118,8 @@ export async function conectarWhatsApp(
 
       if (connection === "open") {
         console.log("Conectado ao WhatsApp.");
+        conexaoAberta = true;
+        atualizarHeartbeat();
         for (const numero of numerosAutorizados) {
           socket
             .onWhatsApp(`${numero}@s.whatsapp.net`)
@@ -111,6 +134,7 @@ export async function conectarWhatsApp(
       }
 
       if (connection === "close") {
+        conexaoAberta = false;
         const statusCode = (lastDisconnect?.error as Boom | undefined)?.output
           ?.statusCode;
         const deveReconectar = statusCode !== DisconnectReason.loggedOut;
